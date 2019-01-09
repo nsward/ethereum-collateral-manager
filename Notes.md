@@ -6,6 +6,19 @@
 investing vault, some play on a double life, relevant words in a different language
 - kind of equivalent to the collateral 'tub' in dai system?
 
+
+# Jan 8
+- Need to consider the interplay between axe and mat and what parameters can be changed by managing contract
+- Who do we pay first, keepers or payout addr? If keepers, managing contracts need to set their params carefully to avoid losses. If payout addr, there will be a point when keepers won't make any profit and won't bite
+- TODO: Do we need to check that managing contracct is actually a contracct? Think through the risks of having managing contract actually be a EOA
+- TODO: Start thinking about how keepers are going to follow this contract
+- For keepers:
+    - Need to have a way to access every account in order by id or some paramter - maybe this is a reason to store by hash instead of address => address?
+    - Need to have global price parameters with a poke or similar update method
+- TODO: Figure out how Cat works, bc might need to make axe global to use lump liquidations
+- TODO: dig into `rad` unit
+-** rad is a new unit and exists to prevent precision loss in the core CDP engine. Instead of using fixed point multiplication (e.g. rmul), integer multiplication is used.
+
 ## LIquidations
 Should only liquidate the minimum amount of assets required to 'cover the debt' by getting owed_amt + penalty of owed_token. Now the position is safe until the holder makes another swap. But, how do we determine which of the held tokens to try to sell first?
 
@@ -57,6 +70,10 @@ The gas costs of auctioning multiple types of collateral make this very difficul
 
 ## var names
 tar, zap, par, lip, sip, vat, pit, bin, jet, hit, wan, rim, kin, fob, pod, jug, box, 
+cat, lad, dad, mom, mob, hat, fat, pan, pot, fee, lap, sap, vim, hog, mop, pop, bud, age, cop or spy =keeper, guy=payee?, gem=due or owe, held=own, mug, pot, ohm, aum(=om), pal, who, zen, zoo, jam, bev, aim
+
+
+smoke, pull, obey
 
 - dir for managing contract and lad for trader / holder?
 - increasing `tab` by the managing contract would be similar to `draw` in dai, increasing the amount due on the collateral

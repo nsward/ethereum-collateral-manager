@@ -19,6 +19,9 @@ investing vault, some play on a double life, relevant words in a different langu
 - TODO: dig into `rad` unit
 -** rad is a new unit and exists to prevent precision loss in the core CDP engine. Instead of using fixed point multiplication (e.g. rmul), integer multiplication is used.
 
+## Reason for Chief - Proxy - Vault
+This design pattern is not truly upgradeable or particularly easy to migrate. But, it's a step in that direction. The proxy serves to hopefully limit the dfferent contracts that users need to approve to move their tokens, and there is potential for it to allow us to follow the 0x proxy plan by deploying new proxies for different asset types (i.e. if I want to use my ERC XXX Car Token as collateral). The vault allows us to only have to worry about mirating data rather than finding all the different funds in all the different places.
+
 ## LIquidations
 Should only liquidate the minimum amount of assets required to 'cover the debt' by getting owed_amt + penalty of owed_token. Now the position is safe until the holder makes another swap. But, how do we determine which of the held tokens to try to sell first?
 
@@ -62,18 +65,23 @@ The gas costs of auctioning multiple types of collateral make this very difficul
 
 - Trader could set a default 0x offer (value > owedAmt), and any time the position is called for a payment, that offer (or combination of offers), is taken and payment is made atomically. This prevents multi-call method. If offer fails, liquidate w/ penalty? Could have a validOfferAvailable() function for contracts to interface with, which checks offer parameters and 0x cancelled orders and returns bool. Theoretically this 0x offer would be made by the trader themselves and would just be a way to prevent liquidation in the event of a payment call. Could not be used in the event of an undercollateralization, because that would take away keepers' incentive to bite. Maybe if offer not valid, could make market offer on oasisDex with minSellAmount == owedAmt, but we can't guarantee that we wouldn't run out of gas or fail to get owedAmt for the collateral, which would both cause reverts. Could also liquidate with penalty immediately under the assumption that the holder was (hopefully) warned about payment by the managing contract and had 0x order as fallback.
 
+## Interest
+TODO: see dss/drip.sol and decipher the new dai interest implementation
 
 ## Undercollateralization
 (When auctioned collateral < tab) -> should we create a system to insure against this, or can we just payout less than the tab, putting the burden on managing contracts to effectively set the risk parameters?
 - If we cover the difference, this value (the insurance money, basically) flows either to the winner of the auction collateral (she got a deal on the collateral) or to the trader (she let the value of the collateral fall below tab and it got covered by someone else) or a combination of both. an 'auction grinding attack' seeks to exploit this in the event that the auction winner and the trader are the same person (but even the managing contract could be that same person)
 - if we don't cover the difference, the trader is still sort of 'getting away with one'. But the real loser is likely the payout address. This is a good reason why they are getting interest to allow the collateral to be traded
-
+g d, ink and art, val and bal, 
 ## var names
 tar, zap, par, lip, sip, vat, pit, bin, jet, hit, wan, rim, kin, fob, pod, jug, box, 
 cat, lad, dad, mom, mob, hat, fat, pan, pot, fee, lap, sap, vim, hog, mop, pop, bud, age, cop or spy =keeper, guy=payee?, gem=due or owe, held=own, mug, pot, ohm, aum(=om), pal, who, zen, zoo, jam, bev, aim
 
+keeper contract = tiger
 
 smoke, pull, obey
+
+Boss, Chief, Angel, Claim
 
 - dir for managing contract and lad for trader / holder?
 - increasing `tab` by the managing contract would be similar to `draw` in dai, increasing the amount due on the collateral
@@ -115,6 +123,9 @@ is a struct with bool approved,  `cap`, `max_rate` etc? could also set a global 
 - Should `cap` serve as the max owed amt and the max total balance? or should these be different?
 
 - * Maybe we could implement some sort of overflow lockup preventer, where if interest + owed amount overflows, do something to mitigate the effect
+
+## Governance
+Token-lock-commit-reveal weighted voting (with the tokens being any token held by the contract). Can split things up so that managing contracts have about the same say as users
 
 ## Alternative Design Patterns
 - No keepers. Each contract decides for itself whether to leave it up to individual users to track their counterparty's collateralization or implements their own incentivization scheme for keepers. Some function notifies the contract of who liquidated the account (or contracts are required to implement a standard function we can call). Maybe we even transfer all the collateral to the contract and let them deal with the liquidation logic

@@ -1,6 +1,6 @@
-pragma solidity ^0.4.24;
+pragma solidity ^0.5.2;
 
-contract PriceOracleInterface {
+contract IOracle {
     // The acutal oracles that we'll use, and therefore the way that oracles
     // is implemented, are TBD. For now, we'll assume that this contract will
     // interact with whatever oracles we choose to use and provide

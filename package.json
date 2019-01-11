@@ -13,6 +13,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bignumber.js": "^8.0.1",
+    "bn-chai": "^1.0.1",
+    "bn.js": "^4.11.8",
+    "chai": "^4.2.0",
     "openzeppelin-solidity": "^2.1.1"
   }
 }

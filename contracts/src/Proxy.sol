@@ -7,7 +7,7 @@ import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
 // modeled after https://github.com/dydxprotocol/protocol/blob/master/contracts/margin/TokenProxy.sol
 contract Proxy is DSMath {
     
-    address vault;
+    address public vault;
 
     modifier onlyVault() {require(msg.sender == vault, "ccm-proxy-auth");_;}
 

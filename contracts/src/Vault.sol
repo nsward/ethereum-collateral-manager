@@ -9,7 +9,7 @@ import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
 contract Vault is Ownable, DSMath {
 
     // address public PROXY;
-    Proxy public proxy;
+    Proxy   public proxy;
     address public chief;
 
     modifier onlyChief() {require(msg.sender == chief, "ccm-vault-auth");_;}

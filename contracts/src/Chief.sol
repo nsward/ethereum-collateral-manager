@@ -6,16 +6,15 @@ import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-solidity/contracts/utils/ReentrancyGuard.sol";
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 
+// TODO return false when possible
+
 // TODO 1/9
 // diagram out the flow between contracts -> esp. storage between chief and vault
 // Get the tester contract working (i.e. external contract for testing Chief)
 // Look into 0x proxy plans
 // Call dad
-// ** add callTime and some way to track timeout / collateral status
-    // - need some sort of state to prevent abuse of move() while waiting for zen
-    // - update interest before entering zen, then era + zen = liquidation time
-
-// TODO: dss uses 0.5.0, need to see how they do interest then switch to ^0.5
+// - update interest before entering zen, then era + zen = liquidation time
+// What happens if we need to increase ohm while in zen?
 
 // TODO: need a max zen?
     // bad things from a super high zen:
@@ -23,12 +22,24 @@ import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
     //  only stop the contract from moving money, which would be the case
     //  anyway if their zen time overflows a uint256
     //  - ?
+// - Add state enum and an amtDueAfterCall (owe?, ohm?) to Acct
+// - add a call() function to start zen without paying out
+// - if zen expires and you get bitten, axe won't go to keepers (they should be 
+//   able to bite, but managing contracts can't just wait until bitten, so they
+//   will call move() first sometimes. axe can't go to managing contract bc it
+//   would incentivize tricky acct management strategies. So it has to go to
+//   a burn pool. As long as we have a burn pool, let's add win and send
+//   axe - win to the burn pool too
+//   
 
 // CCM - contract-collateral-manager
 // Ownable for setting oracle stuff - hopefully governance in the future
 contract Chief is Ownable, Interesting, ReentrancyGuard {
     // TODO:
-    enum State{zen, foo, bar}
+    enum State{ Par, Zen, Bit, Old } // -- par, zen, bit, auc, old
+                                    //This can just be a bool (inZenState) IF we don't need
+                                    // an additional state for liquidations, auctions, etc. (which we probably do?)
+                                    //
 
     // Note: 0x standard followed in favor of our own naming convention here
     struct Order {
@@ -45,10 +56,13 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
         bytes makerAssetData;           // ABIv2 encoded data that can be decoded by a specified proxy contract when transferring makerAsset.
         bytes takerAssetData;           // ABIv2 encoded data that can be decoded by a specified proxy contract when transferring takerAsset.
     }
-    struct TPair {
+    // pair
+    struct Pair {
         // TODO: oracle stuff
         bool use;
     }
+    // type, caste, asset
+    // rule, param, kind, Pack, Club, Laws, Clan
     struct Asset {
         bool use;
         uint tax;
@@ -61,6 +75,7 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
     }
     struct Acct {
         // Set by managing contract
+        uint    ohm;    // TODO, amt of due token needed at end of Zen. Should be 0 if not in zen
         uint    tab;    // Max payout amt 
         uint    bal;    // due balance, denominated in due tokens
         uint    zen;    // time given to return collateral to due before liquidation 
@@ -76,22 +91,24 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
         Order   jet;    // Default order to take if called for payment.
         mapping (address => bool) pals; // Approved to handle trader's account
 
+        State state;
         uint    era;    // Time of last interest accrual
     }
 
     // uint min_tab;        // tab below which it's not profitable for keepers to bite?
-    uint public max_tax;    // maximum interest rate
-    uint public max_tab;    // tab above which keepers can bite TODO: change name of this if tab is not updated with interest
-    uint public acct_id;    // Incremented for keepers to find accounts
+    uint public acct_id;            // Incremented for keepers to find accounts
+    uint public max_tax = uint(-1); // maximum interest rate
+    uint public max_tab = uint(-1); // tab above which keepers can bite TODO: change name of this if tab is not updated with interest
+    
     
     mapping (address => Mama) public mamas; // Contract-wide Asset Paramaters
     // Only internal bc of compiler complaint about nested structs. Need to create getter
     mapping (bytes32 => Acct) internal accts; // keccak256(contract, user) => Account
     mapping (uint => bytes32) public radar; // acct_id => accts key for the acct, finds? finda
-    mapping (address => mapping(address => TPair)) public pairs;  // due => gem => Trading Pair
+    mapping (address => mapping(address => Pair)) public pairs;  // due => gem => Trading Pair
 
     address public proxy;   // Only used for automatic getter
-    Vault public vault;
+    Vault   public vault;
 
     constructor(address _vault, address _proxy) public {
         vault = Vault(_vault);
@@ -137,7 +154,7 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
         acct.era = now;
         if (!_mom) {acct.due = _due;}    // TODO: just set this anyway?
 
-        require(vault.take(_due, _lad, _tab));
+        require(vault.take(_due, _lad, _tab), "ccm-chief-open-take-failed");
         // TODO
         acct.bal = _tab;
 
@@ -152,7 +169,9 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
         address _gem,   // address of the token to add
         address _lad,   // address of the holder / payer
         bool    _mom    // set this to contract-wide params?
-    ) private returns (bool) {
+    ) 
+        private returns (bool) 
+    {
         // do all the checks
         // if mom grab from mom else grab from baby
         // do last check and set
@@ -211,11 +230,10 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
     ////// Managing Contract Functions:
     // open()       - implemented
     // mdue()   - add initial due to mamas, born, girl?, mama
-    //    - add initial due to specific acct, -- Not needed, can't be initialized w/o one
     // mama()   - add an Asset to mamas, mgem, 
     // baby()   - add an Asset to specific acct, daut, bgem
-    //          - disable a gem in mama for future users - could also use mama/daut(false) to remove, mpop, clean, moff and boff, m_on and b_on
-    //          - disable a gem for specific acct as long as not currently held, bump, bpop  ** make these be able to toggle use
+    // bump()   - disable a gem in mama for future users - could also use mama/daut(false) to remove, mpop, clean, moff and boff, m_on and b_on
+    //          - X disable a gem for specific acct as long as not currently held, bump, bpop  ** make these be able to toggle use
     // move()   - pay out to specified address, send-probs confusing, post, drop, give, move, take
     // close()?  - set tab = 0, either leave user balance or transfer it to pull() balances
     //
@@ -249,6 +267,15 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
     /////////////
     // External Functions
     ////////////
+    // TODO
+    function lock(address _who, address _gem, uint amt) external returns (uint) {
+        // TODO: do we need to check safe()? Can locking additional collateral ever make unsafe?
+    }
+
+    // TODO
+    function safe() public view returns (bool) {
+        
+    }
 
     // Set the contract-wide due token
     function mdue(address _due) external returns (bool) {
@@ -296,7 +323,16 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
     }
     // Open an account that will use mama params
     function open(uint _tab, uint _zen, address _lad) external nonReentrant returns (bool) {
-        return _open(_tab, _zen, _lad, address(0), false);
+        return _open(_tab, _zen, _lad, address(0), true);
+    }
+
+    // toggle mama asset on and off
+    // can't do this for an acct bc they have already agreed to the terms
+    // _gem - which gem to toggle
+    function bump(address _gem, bool _use) external returns (bool) {
+        if (mamas[msg.sender].gems[_gem].mat > RAY) {return false;}
+        mamas[msg.sender].gems[_gem].use = _use;
+        return true;
     }
 
     
@@ -304,6 +340,49 @@ contract Chief is Ownable, Interesting, ReentrancyGuard {
     // Getters
     /////////////
     
+    // stack to deep error if return everything at once
+    function acctUints(address _who, address user)
+        public
+        view
+        returns (uint era, uint tab, uint bal, uint val, uint zen, uint ohm)
+        // returns (uint, uint, uint, uint, uint, uint)
+    {
+        Acct memory acct = accts[keccak256(abi.encodePacked(_who, user))];
+        era = acct.era;
+        tab = acct.tab;
+        bal = acct.bal;
+        val = acct.val;
+        zen = acct.zen;
+        ohm = acct.ohm;
+        
+        // State state = acct.state;
+        // return (_era, _tab, _bal, _val, _zen, _ohm);
+    }
+
+    function acctState(address _who, address user) external view returns (State) {
+        return accts[keccak256(abi.encodePacked(_who, user))].state;
+    }
+
+    function acctAddresses(address _who, address user)
+        external
+        view
+        returns (address who, address due, address gem)
+    {
+        Acct memory acct = accts[keccak256(abi.encodePacked(_who, user))];
+        who = acct.who; // TODO: don't need this after testing
+        due = acct.due;
+        gem = acct.gem;
+    }
+
+    function acctBools(address _who, address user) 
+        external
+        view 
+        returns (bool mom, bool opt)
+    {
+        Acct memory acct = accts[keccak256(abi.encodePacked(_who, user))];
+        mom = acct.mom;
+        opt = acct.opt;
+    } 
 
 
 }

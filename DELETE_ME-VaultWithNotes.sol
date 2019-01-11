@@ -80,6 +80,9 @@ contract CollateralVault is Interest {
 
     }
 
+
+    // type, caste, asset
+    // rule, param, kind, Pack, Club, Laws, Clan
     // mug, jug, can, jar
     struct Account {
         // pal, who, bud

@@ -26,12 +26,12 @@ contract Vault is Ownable, DSMath {
     mapping (address => uint) public money;
 
     // Transfer tokens from user to us
-    function take(address _gem, address src, uint amt) external onlyChief returns (bool) {
-        require(proxy.deal(_gem, src, address(this), amt), "ccm-vault-take-deal-failed");
+    function take(address gem, address src, uint amt) external onlyChief returns (bool) {
+        require(proxy.deal(gem, src, address(this), amt), "ccm-vault-take-deal-failed");
 
-        money[_gem] = add(money[_gem], amt);
+        money[gem] = add(money[gem], amt);
 
-        rich(_gem);
+        rich(gem);
 
         return true;
     }
@@ -57,15 +57,15 @@ contract Vault is Ownable, DSMath {
 
     // TODO: change return value if not being used
     // Add to user's pull balance
-    function gift(address _gem, address lad, uint amt) external onlyChief returns (uint) {
-        pulls[lad][_gem] = add(pulls[lad][_gem], amt);
-        return pulls[lad][_gem];
+    function gift(address gem, address lad, uint amt) external onlyChief returns (uint) {
+        pulls[lad][gem] = add(pulls[lad][gem], amt);
+        return pulls[lad][gem];
     }
 
     // Verify that nothing has gone crazy
-    function rich(address _gem) private view {
+    function rich(address gem) private view {
         // If this is false, we have big problems
-        assert(IERC20(_gem).balanceOf(address(this)) >= money[_gem]);
+        assert(IERC20(gem).balanceOf(address(this)) >= money[gem]);
     }
 
     ///////////

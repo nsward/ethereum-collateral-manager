@@ -1,4 +1,4 @@
-pragma solidity 0.5.2;
+pragma solidity ^0.5.2;
 
 import "./Proxy.sol";
 import "../lib/DSMath.sol";
@@ -23,13 +23,13 @@ contract Vault is Ownable, DSMath {
     // Keep track of all our $$$
     // Note that this is only update when tokens come in or out. No change
     // when we move balances from accounts to pulls
-    mapping (address => uint) public money;
+    mapping (address => uint) public chest;
 
     // Transfer tokens from user to us
     function take(address gem, address src, uint amt) external onlyChief returns (bool) {
         require(proxy.deal(gem, src, address(this), amt), "ccm-vault-take-deal-failed");
 
-        money[gem] = add(money[gem], amt);
+        chest[gem] = add(chest[gem], amt);
 
         rich(gem);
 
@@ -43,7 +43,7 @@ contract Vault is Ownable, DSMath {
 
         pulls[dst][_gem] = sub(pulls[dst][_gem], amt);
         
-        money[_gem] = sub(money[_gem], amt);
+        chest[_gem] = sub(chest[_gem], amt);
 
         IERC20 gem = IERC20(_gem);
         // NOTE: this is pull only - i.e. this will only be called from Chief.pull()
@@ -65,7 +65,7 @@ contract Vault is Ownable, DSMath {
     // Verify that nothing has gone crazy
     function rich(address gem) private view {
         // If this is false, we have big problems
-        assert(IERC20(gem).balanceOf(address(this)) >= money[gem]);
+        assert(IERC20(gem).balanceOf(address(this)) >= chest[gem]);
     }
 
     ///////////

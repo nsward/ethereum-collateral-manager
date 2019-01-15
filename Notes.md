@@ -6,6 +6,32 @@
 investing vault, some play on a double life, relevant words in a different language
 - kind of equivalent to the collateral 'tub' in dai system?
 
+# Dai Questions:
+- Why moving to auctions instead of boom/bust spread? -- distrust of oracles?
+
+# MCD
+Pit address = 0xE7CF3198787C9A4daAc73371A38f29aAeECED87e
+
+REP.USD
+$10.21 / 1 REP (coin market cap)
+Spotter address = 0xE7CF3198787C9A4daAc73371A38f29aAeECED87e
+OSM address = 0xf88bBDc1E2718F8857F30A180076ec38d53cf296 
+ilk = 0x5245500000000000000000000000000000000000000000000000000000000000 ?
+OSM.peek() raw: 0000000000000000000000000000000000000000000000008cb5a37afbc6ff00
+     as number:             10139189884700000000
+pit.ilks[ilk].spot: 5964229343941176470588235294
+
+
+ETH.USD
+$129.69 / 1 Eth (coin market cap)
+Spotter address = 0x0a787b0c65A6b4ffDE2C10c01eb4AC7409606533
+OSM address = 0x9FfFE440258B79c5d6604001674A4722FfC0f7Bc
+ilk = 0x4554480000000000000000000000000000000000000000000000000000000000
+OSM.peek() raw: 00000000000000000000000000000000000000000000000700df1485a4b70000
+     as number:             129190000000000000000 = 129.19 x10^18
+                            inverse should be 1 / 129.19 = 0.00771069 Eth / 1 USD
+
+pit.ilks[ilk].spot: 86126666666666666666666666666 = 129190000000000000000 * 10^9 * 10^27 / 1.5*10^27
 
 # Jan 8
 - Need to consider the interplay between axe and mat and what parameters can be changed by managing contract
@@ -19,10 +45,26 @@ investing vault, some play on a double life, relevant words in a different langu
 - TODO: dig into `rad` unit
 -** rad is a new unit and exists to prevent precision loss in the core CDP engine. Instead of using fixed point multiplication (e.g. rmul), integer multiplication is used.
 
+## Default Order / Jet
+The default order will be broadcast on-chain, so anyone could take what is presumably a very favorable order. The user will have to set taker address as the proxy. The chief will store a hash or some identifier of the order and ensure that our contract only takes it once so that others can't submit the same default order then force a liquidation and take the order.
+It might seem silly to have default orders, as that would require you to hold the same amount due token anyway, but here are some situations it might make sense:
+- Due token is your main day to day token and you want to have it in your wallet for everyday spending rather than locked in collateral.
+- You can have multiple accounts with different managing contracts and the same chunk of due token could cover surprise liquidations for all of them.
+- You could enter into an insurance contract that would cover your default order for you
+- You might know that the max requested payment for the contract is X amt, so you would only need to have your default order cover that piece of your total due amt.
+
+## Applications
+payment channels, augur, 
+- While it makes obvious sense for collateral held either in large amounts or for a long time, one of the primary goals is to allow capital to be mobilized in an egalitarian way. To allow anyone to mobiliize their capital efficiently, regardless of the quantity. A big part of this will be decreasing gas costs as much as possible.
+
 ## Reason for Chief - Proxy - Vault
 This design pattern is not truly upgradeable or particularly easy to migrate. But, it's a step in that direction. The proxy serves to hopefully limit the dfferent contracts that users need to approve to move their tokens, and there is potential for it to allow us to follow the 0x proxy plan by deploying new proxies for different asset types (i.e. if I want to use my ERC XXX Car Token as collateral). The vault allows us to only have to worry about mirating data rather than finding all the different funds in all the different places.
 
 ## LIquidations
+Maybe we can send axe - win to the managing contract's "backup" acct, which covers any future deficits in the contract, but would this allow attackers to mooch off of previous defaulters in the contract? The only time funds can exit outside of a deficit liquidation would be to send it to the governance-approved charity address. Could this insurance pool also serve to front funds for batched dutch auctions, so that funds can be claimed before auction settlement? 
+
+Could also do a simple boom/bust spread type thing for liquidations rather than auctions, similar to what Sai did or Compound does now.
+
 Should only liquidate the minimum amount of assets required to 'cover the debt' by getting owed_amt + penalty of owed_token. Now the position is safe until the holder makes another swap. But, how do we determine which of the held tokens to try to sell first?
 
 - Can we allow traders to set the order that their positions will be sold off in the event of a liquidation or a request for the collateral by the managing contract?

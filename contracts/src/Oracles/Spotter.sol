@@ -17,7 +17,7 @@ contract OracleLike {
     function peek() public returns (bytes32, bool);
 }
 
-contract Scout is Ownable, DSMath {
+contract Spotter is Ownable, DSMath {
     ChiefLike public chief;
     OracleLike public oracle;
     bytes32   public pair;

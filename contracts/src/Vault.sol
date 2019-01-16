@@ -18,7 +18,7 @@ contract Vault is Ownable, DSMath {
     // for pull(). Note that this is the net payouts from all accounts user/contract 
     // is involved in and is separate from the balance within accounts
     // user => token address => balance of that token that is held in vault ready
-    mapping(address => mapping(address => uint)) public pulls;
+    mapping(address => mapping(address => uint)) public claims;
 
     // Keep track of all our $$$
     // Note that this is only update when tokens come in or out. No change
@@ -31,7 +31,7 @@ contract Vault is Ownable, DSMath {
 
         chest[gem] = add(chest[gem], amt);
 
-        rich(gem);
+        verifyBalance(gem);
 
         return true;
     }
@@ -39,9 +39,9 @@ contract Vault is Ownable, DSMath {
     // Transfer tokens from us to user
     function give(address _gem, address dst, uint amt) external onlyChief returns (bool) {
         // This is also asserted by line below, but leaving extra check in here for now
-        require(pulls[dst][_gem] >= amt, "ccm-vault-give-insufficient-balance");
+        require(claims[dst][_gem] >= amt, "ccm-vault-give-insufficient-balance");
 
-        pulls[dst][_gem] = sub(pulls[dst][_gem], amt);
+        claims[dst][_gem] = sub(claims[dst][_gem], amt);
         
         chest[_gem] = sub(chest[_gem], amt);
 
@@ -49,21 +49,20 @@ contract Vault is Ownable, DSMath {
         // NOTE: this is pull only - i.e. this will only be called from Chief.pull()
         require(gem.transfer(dst, amt), "ccm-vault-give-transfer-failed");
 
-        // Make sure we're still rich $$
-        rich(_gem);
+        verifyBalance(_gem);
 
         return true;
     }
 
     // TODO: change return value if not being used
     // Add to user's pull balance
-    function gift(address gem, address lad, uint amt) external onlyChief returns (uint) {
-        pulls[lad][gem] = add(pulls[lad][gem], amt);
-        return pulls[lad][gem];
+    function addClaim(address gem, address lad, uint amt) external onlyChief returns (uint) {
+        claims[lad][gem] = add(claims[lad][gem], amt);
+        return claims[lad][gem];
     }
 
     // Verify that nothing has gone crazy
-    function rich(address gem) private view {
+    function verifyBalance(address gem) private view {
         // If this is false, we have big problems
         assert(IERC20(gem).balanceOf(address(this)) >= chest[gem]);
     }
@@ -74,7 +73,7 @@ contract Vault is Ownable, DSMath {
 
     // Vault has to be deployed before Chief and Proxy, so no constructor
     // Use this to set other contract addresses
-    function init(address _chief, address _proxy) external onlyOwner {
+    function initAuthContracts(address _chief, address _proxy) external onlyOwner {
         // Prevent owner from changing chief address
         require(chief == address(0), "ccm-vault-init-no-new-chief");
         chief = _chief; 

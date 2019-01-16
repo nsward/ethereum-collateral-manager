@@ -1,9 +1,9 @@
 const ChiefContract = artifacts.require("./src/Chief.sol");
 const VaultContract = artifacts.require("./src/Vault.sol");
 const ProxyContract = artifacts.require("./src/Proxy.sol");
-const ScoutContract = artifacts.require("./src/Oracles/Scout.sol");
+const SpotterContract = artifacts.require("./src/Oracles/Spotter.sol");
 const TokenContract = artifacts.require("openzeppelin-solidity/contracts/token/ERC20/ERC20Mintable.sol");
-const ValueContract = artifacts.require("./src/Oracles/Value.sol");
+const OracleContract = artifacts.require("./src/Oracles/Oracle.sol");
 
 // Deploying:
 // 1. deploy vault (no constructor)
@@ -30,42 +30,24 @@ module.exports = async function(deployer, network, accounts) {
     const chief = await ChiefContract.deployed();
 
     // Pass chief and proxy addresses to vault contract
-    await vault.init(chief.address, proxy.address, {from:owner});
+    await vault.initAuthContracts(chief.address, proxy.address, {from:owner});
 
     // deploy the medianizer. These will ultimately be already-deployed 
     // MakerDao medianizers
-    await deployer.deploy(ValueContract, web3.utils.toHex(price), has)
-    const value = await ValueContract.deployed();
+    await deployer.deploy(OracleContract, web3.utils.toHex(price), has)
+    const oracle = await OracleContract.deployed();
     
     // Deploy token contracts separately so they have different addresses
     await deployer.deploy(TokenContract)
-    const due = await TokenContract.deployed();
+    const dueToken = await TokenContract.deployed();
     await deployer.deploy(TokenContract)
-    const gem = await TokenContract.deployed();
+    const tradeToken = await TokenContract.deployed();
 
-    // deploy scout with chief and medianizer addresses and the pair to "scout" for
+    // deploy spotter with chief and medianizer addresses and the pair to "spot" for
     const pair = web3.utils.soliditySha3(
-        {type:'address', value:due.address}, 
-        {type:'address', value:gem.address}
+        {type:'address', value:dueToken.address}, 
+        {type:'address', value:tradeToken.address}
     );
-    await deployer.deploy(ScoutContract, chief.address, value.address, pair);
+    await deployer.deploy(SpotterContract, chief.address, oracle.address, pair);
 
-
-    // TODO: remove
-    // deployer.deploy(VaultContract).then((vaultInst) =>
-    //     deployer.deploy(ProxyContract, vaultInst.address)
-    //         .then((proxyInst) => 
-    //             deployer.deploy(
-    //                 ChiefContract,
-    //                 vaultInst.address,
-    //                 proxyInst.address
-    //             ).then((chiefInst) => 
-    //                 vaultInst.init(
-    //                     chiefInst.address, 
-    //                     proxyInst.address,
-    //                     {from:owner}
-    //                 )
-    //             )
-    //         )
-    // );
 }

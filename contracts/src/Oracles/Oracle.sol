@@ -1,10 +1,13 @@
 pragma solidity ^0.5.2;
 
-// This will ultimately be a MakerDao medianizer contract:
+// This can ultimately be any oracle contract that the community decides
+// is trustworthy, and we can use different oracles for different token
+// pairs simply by deploying spotters with different price functions
+// and interfaces with the oracle. For now, this contract mimics the 
+// interface of the MakerDAO medianizer contracts and allows us to
+// manipulate the value for testing purposes
 // https://github.com/makerdao/medianizer/blob/master/src/medianizer.sol
-// for now, it implements some of the DSValue functionality and allows
-// us to manipulate the oracle for testing
-contract Value {
+contract Oracle {
 
     bytes32 val;
     bool public has;
@@ -22,22 +25,16 @@ contract Value {
         has = _has;
     }
 
+    // returns the price value and a bool indicating the validity of the price
     function peek() external view returns (bytes32, bool) {
         return (val, has);
     }
 
+    // For testing. Set the price value and the validity bool
     function file(bytes32 what, uint data) public auth {
         if (what == "val") val = bytes32(data);
     }
     function file(bytes32 what, bool data) public auth {
         if (what == "has") has = data;
-    }
-
-    // TODO remove
-    function foo() public view returns (uint) {return uint(val);}
-    function bar() public pure returns (bytes32) {
-        bytes32 baz = bytes32(uint(100));
-        // return uint(baz);
-        return baz;
     }
 }

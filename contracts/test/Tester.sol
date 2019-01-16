@@ -34,7 +34,7 @@ contract Tester is Ownable {
     }
 
     
-    function bump(address _gem, bool _use) external returns (bool) {
-        return chief.bump(_gem, _use);
+    function toggleExecAsset(address _gem, bool _use) external returns (bool) {
+        return chief.toggleExecAsset(_gem, _use);
     }
 }

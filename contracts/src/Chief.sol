@@ -37,7 +37,8 @@ import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 // Ownable for setting oracle stuff - hopefully governance in the future
 contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     // TODO:
-    enum State{ Par, Zen, Bit, Old } // -- par, zen, bit, auc, old
+    // Par, Called, Liquidation, Old
+    enum State{ Par, Call, Bit, Old } // -- par, zen, bit, auc, old
                                     //This can just be a bool (inZenState) IF we don't need
                                     // an additional state for liquidations, auctions, etc. (which we probably do?)
                                     //
@@ -57,48 +58,51 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         bytes makerAssetData;           // ABIv2 encoded data that can be decoded by a specified proxy contract when transferring makerAsset.
         bytes takerAssetData;           // ABIv2 encoded data that can be decoded by a specified proxy contract when transferring takerAsset.
     }
-    // pair
-    struct Pair {
-        address scout;  // fetches and sets the spot price
-        uint val;    // spot price. Important note: does not incorporate mat like dai's spotter does
-        bool use;       // valid pair?
+    // tokenPair, tradingPair
+    struct TokenPair {
+        address spotter;  // spotter  // fetches and sets the spot price
+        uint spotPrice;       // spotPrice    // spot price. Important note: does not incorporate mat like dai's spotter does
+        bool use;       // valid, approved, use       // valid pair?
         // // TODO: oracle stuff
         // bool use;
         // uint val;  // val?, Price. pairs[gem1][gem2] is selling gem1 for gem2.
         //             // price will be X gem2 tokens for 1 gem1 token
         //   val should be due tokens / 1 gem
     }
-    
-    struct Asset {
-        bool use;
-        uint tax;
-        uint mat;   // Minimum Collateralization Ratio
-        uint axe;   // liquidation penalty
+    // AssetClass Token, tokenParams, params, 
+    struct AssetClass {
+        bool use;   
+        uint tax;   // rate
+        uint biteLimit;   // liquidationLimit, mcr, biteLimit        // Minimum Collateralization Ratio
+        uint biteFee;   // liquidationPenalty, biteFee, penaltyRatio            // liquidation penalty
+        // add keeperReward, biteReward, bitePay? What do keepers get for biting?
+                
     }
-    struct Mama {
-        address due;
-        mapping (address => Asset) gems;
+    // execParam, execPair, 
+    struct ExecParam {
+        address dueToken;
+        mapping (address => AssetClass) tokens;    // tokenParams
     }
-    struct Acct {
+    struct Account {
         // Set by managing contract
-        uint    ohm;    // TODO, amt of due token needed at end of Zen. Should be 0 if not in zen
-        uint    tab;    // Max payout amt 
-        uint    bal;    // due balance, denominated in due tokens
-        uint    zen;    // time given to return collateral to due before liquidation 
-        bool    mom;    // true ? use local gems : use mamas[who]. ** make sure mamas[mom].axe valid (> 1)?
-        address who;    // Address of managing contract, man, 
-        address due;    // Address of the ERC20 token to pay out in
-        mapping (address => Asset) gems;    // Tokens that can be held as collateral and the parameters
+        uint    callTab;    // callAmt, callTab    // TODO, amt of due token needed at end of Zen. Should be 0 if not in zen
+        uint    dueTab;    // dueTab, dueAmt, owedAmt    // Max payout amt 
+        uint    dueBalance;    // dueBal, dueBalance     // due balance, denominated in due tokens
+        uint    callTime;    // callTime    // time given to return collateral to due before liquidation 
+        bool    useExecParams;    // ?    // true ? use local gems : use mamas[who]. ** make sure mamas[mom].axe valid (> 1)?
+        address exec;    // managingContract, manager, exec, captain    // Address of managing contract, man, 
+        address dueToken;    // dueToken, owedToken    // Address of the ERC20 token to pay out in
+        mapping (address => AssetClass) tokens;    // tokens    // Tokens that can be held as collateral and the parameters
 
         // Set by user
-        bool    opt;    // opt-in to dutch auction? auc
-        uint    own;    // lot, vol, own? gem balance, denominated in gems?
-        address gem;    // Token currently held (can be in addition to due balance)
-        Order   jet;    // Default order to take if called for payment.
+        bool    useAuction;    // useAuction, auction    // opt-in to dutch auction? auc
+        uint    tradeBalance;    // heldBal, heldBalance    // lot, vol, own? gem balance, denominated in gems?
+        address tradeToken;    // tradeToken, heldToken    // Token currently held (can be in addition to due balance)
+        Order   safeOrder;    // defaultOrder, safeOrder    // Default order to take if called for payment.
         mapping (address => bool) pals; // Approved to handle trader's account
 
-        State state;
-        uint    era;    // Time of last interest accrual
+        State state;   
+        uint  lastAccrual;    // lastAccrual,    // Time of last interest accrual
     }
 
     // function foo(address a, address b) public pure returns(bytes32) {
@@ -107,23 +111,23 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
     // TODO: get lock() working(), then come back to this?
     // or find a way to figure this out without gem balance?
-    function safe(bytes32 acctKey) public view returns (bool) {
-    // function safe(address a, address b) public view returns (uint) {
-        // literally just return whether adjusted collateral value > mat * tab
-        // where adjusted collateral value = bal + own * pairs[]
-        // return accts[keck(a, b)].tab;
-        Acct memory acct = accts[acctKey];
-        Asset memory asset = accts[acctKey].gems[accts[acctKey].gem];
+    // function safe(bytes32 acctKey) public view returns (bool) {
+    // // function safe(address a, address b) public view returns (uint) {
+    //     // literally just return whether adjusted collateral value > mat * tab
+    //     // where adjusted collateral value = bal + own * pairs[]
+    //     // return accts[keck(a, b)].tab;
+    //     Acct memory acct = accts[acctKey];
+    //     Asset memory asset = accts[acctKey].gems[accts[acctKey].gem];
 
-        uint debit = mul(grow(acct.tab, asset.tax, sub(now, acct.era)), asset.mat);
+    //     uint debit = mul(grow(acct.tab, asset.tax, sub(now, acct.era)), asset.mat);
 
-        uint val = pairs[keck(acct.due, acct.gem)].val;
-        uint credit = add(acct.bal, mul(acct.own, val));    // wmul()?
+    //     uint val = pairs[keck(acct.due, acct.gem)].val;
+    //     uint credit = add(acct.bal, mul(acct.own, val));    // wmul()?
 
-        // uint ownInDueToken = mul(acct.own, val);
+    //     // uint ownInDueToken = mul(acct.own, val);
 
-        return credit >= debit;
-    }
+    //     return credit >= debit;
+    // }
 
     // TODO: check check check this
     // TODO: manage owe overflow here?
@@ -170,17 +174,17 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
     // "the minimum amount you must lock in the cdp is 0.005 ether"
     // TODO: set these values
-    uint256 public acct_id;             // Incremented for keepers to find accounts
-    uint256 public min_tab = 1;         // not profitable for keepers to bite below this
-    uint256 public max_tax = uint(-1);  // maximum interest rate
-    uint256 public max_tab = uint(-1);  // tab above which keepers can bite TODO: change name of this if tab is not updated with interest
+    uint256 public accountId;             // Incremented for keepers to find accounts
+    uint256 public minTab = 1;         // minTab   // not profitable for keepers to bite below this
+    uint256 public maxTax = uint(-1);  // maxRate  // maximum interest rate
+    uint256 public maxTab = uint(-1);  // maxTab  // tab above which keepers can bite TODO: change name of this if tab is not updated with interest
     
     
-    mapping (address => Mama) public mamas; // Contract-wide Asset Paramaters
+    mapping (address => ExecParam) public execParams; //execParams    // Contract-wide Asset Paramaters
     // Only internal bc of compiler complaint about nested structs. Need to create getter
-    mapping (bytes32 => Acct) internal accts; // keccak256(contract, user) => Account
-    mapping (bytes32 => Pair) public pairs;  // keccak256(due, gem) => Trading Pair
-    mapping (uint256 => bytes32) public radar; // acct_id => accts key for the acct, finds? finda
+    mapping (bytes32 => Account) internal accounts; // keccak256(contract, user) => Account
+    mapping (bytes32 => TokenPair) public tokenPairs;  //tokenPairs, tradingPairs // keccak256(due, gem) => Trading Pair
+    mapping (uint256 => bytes32) public accountKeys;  // acctKeys, acctIds -> acct_id => acct_key // acct_id => accts key for the acct, finds? finda
 
     // address public proxy;   // Only used for automatic getter
     Vault public vault;
@@ -193,14 +197,14 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     // called by the managing contract
     // if _mom == true, _due should be 0
     function _open(
-        uint256 tab,   // Collateral amount, denominated in _due token
-        uint256 zen,
-        address lad,   // Address of the payer TODO: can't be msg.sender?
-        address due,   // Address of the token to pay out in
-        bool    mom    // If true, use contract-wide Asset Params. else, set below
+        uint256 dueTab,   // Collateral amount, denominated in _due token
+        uint256 callTime,
+        address user,   // Address of the payer TODO: can't be msg.sender?
+        address dueToken,   // Address of the token to pay out in
+        bool    useExecParams    // If true, use contract-wide Asset Params. else, set below
     ) private returns (bool) {
         // Account user can't be zero
-        require(lad != address(0), "ccm-chief-open-lad-invalid");
+        require(user != address(0), "ccm-chief-open-lad-invalid");
 
         // TODO: Should we require the manager to be a contrract? To prevent people unaware
         // that an EOA would be able to take all their funds?
@@ -208,45 +212,46 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         // Payout token can't be 0 unless mama params being used. 
         // NOTE: No checks on whether _due has any token matches
         // if mom, check contract-wide due address, else check _due
-        if (mom) {
-            require(mamas[msg.sender].due != address(0), "ccm-chief-open-mama-due-invalid");
+        if (useExecParams) {
+            require(execParams[msg.sender].dueToken != address(0), "ccm-chief-open-mama-due-invalid");
         } else {
-            require(due != address(0), "ccm-chief-open-due-invalid");
+            require(dueToken != address(0), "ccm-chief-open-due-invalid");
         }
 
         // Check that owed amt is valid
-        require(tab > min_tab && tab < max_tab, "ccm-chief-open-tab-invalid");
+        require(dueTab > minTab && dueTab < maxTab, "ccm-chief-open-tab-invalid");
         // Grab the account
-        bytes32 acctKey = keck(msg.sender, lad);
-        Acct storage acct = accts[acctKey];
+        bytes32 accountKey = getHash(msg.sender, user);
+        Account storage account = accounts[accountKey];
         // Check that account doesn't exist already. TODO: check who too?
-        require(acct.era == 0, "ccm-chief-open-account-exists");
+        require(account.lastAccrual == 0, "ccm-chief-open-account-exists");
         // Add id to radar and increment acct_id
-        radar[acct_id] = acctKey;
-        acct_id = add(acct_id, 1); 
+        accountKeys[accountId] = accountKey;
+        accountId = add(accountId, 1); 
         // Initialize the account
-        acct.who = msg.sender;
-        acct.tab = tab;
-        acct.mom = mom;
-        acct.zen = zen;
-        acct.era = now;
-        if (!mom) {acct.due = due;}    // TODO: just set this anyway?
+        account.exec = msg.sender;
+        account.dueTab = dueTab;
+        account.useExecParams = useExecParams;
+        account.callTime = callTime;
+        account.lastAccrual = now;
+        if (!useExecParams) {account.dueToken = dueToken;}    // TODO: just set this anyway?
 
-        require(vault.take(due, lad, tab), "ccm-chief-open-take-failed");
+        require(vault.take(dueToken, user, dueTab), "ccm-chief-open-take-failed");
         // TODO
-        acct.bal = tab;
+        account.dueBalance = dueTab;
 
         return true;       
     }
 
     // add new Asset to mama or acct
-    function _ngem(
+    // addAsset(), addAssetClass(), addToken, addAsset
+    function _addAsset(
         uint256 tax,   // interest rate charged on swapped collateral   
-        uint256 mat,   // minimum collateralization ratio, as a ray
-        uint256 axe,   // liquidation penalty, as a ray
-        address gem,   // address of the token to add
-        address lad,   // address of the holder / payer
-        bool    mom    // set this to contract-wide params?
+        uint256 biteLimit,   // minimum collateralization ratio, as a ray
+        uint256 biteFee,   // liquidation penalty, as a ray
+        address token,   // address of the token to add
+        address user,   // address of the holder / payer
+        bool    useExecParams    // set this to contract-wide params?
     ) 
         private returns (bool) 
     {
@@ -256,50 +261,51 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
         // TODO: make sure we don't need a minimum for axe
         // liquidation penalty > 1 required to prevent auction grinding
-        require(axe > RAY, "ccm-chief-ngem-axe-invalid");
+        require(biteFee > RAY, "ccm-chief-ngem-axe-invalid");
         // extra collateral has to be able to at least cover axe
-        require(mat > axe, "ccm-chief-ngem-mat-invalid");
+        require(biteLimit > biteFee, "ccm-chief-ngem-mat-invalid");
         // Check that tax is valid
-        require(tax < max_tax, "ccm-chief-ngem-tax-invalid");
+        require(tax < maxTax, "ccm-chief-ngem-tax-invalid");
 
         // TODO: probably don't need these, checking pairs
         // require(mama.due != address(0), "collateral-vault-mama-due-not-set");
         // require(_gem != address(0), "collateral-vault-mama-address-invalid");
 
         bytes32 key;
-        address due;
-        Asset memory ngem;
+        address dueToken;
+        AssetClass memory asset;
         // mama or account?
-        if (mom) { 
-            due = mamas[msg.sender].due;
-            ngem = mamas[msg.sender].gems[gem]; 
+        if (useExecParams) { 
+            dueToken = execParams[msg.sender].dueToken;
+            asset = execParams[msg.sender].tokens[token]; 
         } else {
              // Check that account exists 
-            key = keck(msg.sender, lad);
-            require(accts[key].era > 0, "ccm-chief-ngem-acct-nonexistant");
+            key = getHash(msg.sender, user);
+            require(accounts[key].lastAccrual > 0, "ccm-chief-ngem-acct-nonexistant");
             // Check that account is not using the mom params (waste of gas and
             // deceptive to the contract to set params that aren't used)
-            require(!accts[key].mom, "ccm-chief-ngem-acct-uses-mom");
-            due = accts[key].due;
-            ngem = accts[key].gems[gem];
+            require(!accounts[key].useExecParams, "ccm-chief-ngem-acct-uses-mom");
+            dueToken = accounts[key].dueToken;
+            asset = accounts[key].tokens[token];
         }
 
         // gem must be an approved token pair with due
-        require(pairs[keck(due, gem)].use, "ccm-chief-ngem-token-pair-invalid");
+        require(tokenPairs[getHash(dueToken, token)].use, "ccm-chief-ngem-token-pair-invalid");
 
         // TODO: mama.mat>0 very important, prevents editing gem params
         // after setting use to false. Make sure there's no way around this
         // Also, does just checking mat work?
         // require(!mama.use && mama.mat > 0, "collateral-vault-mama-gem-in-use");
-        require(ngem.mat > 0, "ccm-chief-ngem-gem-in-use");
+        require(asset.biteLimit > 0, "ccm-chief-ngem-gem-in-use");
 
-        ngem.use = true;
-        ngem.tax = tax;
-        ngem.mat = mat;
-        ngem.axe = axe;
+        asset.use = true;
+        asset.tax = tax;
+        asset.biteLimit = biteLimit;
+        asset.biteFee = biteFee;
 
-        if(mom) {mamas[msg.sender].gems[gem] = ngem;}
-        else {accts[key].gems[gem] = ngem;}
+
+        if(useExecParams) {execParams[msg.sender].tokens[token] = asset;}
+        else {accounts[key].tokens[token] = asset;}
 
         return true; 
     }
@@ -348,43 +354,43 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
     // TODO: do we need to check safe()? Nope - might be using this while unsafe to get safe.
     function lock(
-        address who, 
-        address gem, 
+        address exec, 
+        address token, 
         uint256 amt
     ) 
         external nonReentrant returns (bool) 
     {    
-        require(who != address(0) && gem != address(0) && amt > 0, "ccm-chief-lock-invalid-inputs");
+        require(exec != address(0) && token != address(0) && amt > 0, "ccm-chief-lock-invalid-inputs");
 
         // Acct storage acct = accts[keccak256(abi.encodePacked(who, msg.sender))];
-        Acct storage acct = accts[keck(who, msg.sender)];
-        address due;
+        Account storage account = accounts[getHash(exec, msg.sender)];
+        address dueToken;
         bool use;
 
-        if (acct.mom) {                     // use mom params
-            due = mamas[who].due;
-            use = mamas[who].gems[gem].use;
+        if (account.useExecParams) {                     // use mom params
+            dueToken = execParams[exec].dueToken;
+            use = execParams[exec].tokens[token].use;
         } else {                            // use acct params
-            due = acct.due;
-            use = acct.gems[gem].use;
+            dueToken = account.dueToken;
+            use = account.tokens[token].use;
         }
 
-        if (gem == due) {                  // topping up due token
-            require(vault.take(gem, msg.sender, amt));
-            acct.bal = add(acct.bal, amt);
+        if (token == dueToken) {                  // topping up due token
+            require(vault.take(token, msg.sender, amt));
+            account.dueBalance = add(account.dueBalance, amt);
             return true;
         } 
-        if (gem == acct.gem) {             // topping up gem token
-            require(vault.take(gem, msg.sender, amt)); 
-            acct.own = add(acct.own, amt);
+        if (token == account.tradeToken) {             // topping up gem token
+            require(vault.take(token, msg.sender, amt)); 
+            account.tradeBalance = add(account.tradeBalance, amt);
             return true;
         }
-        if (acct.gem == address(0)) {       // adding a new gem token
+        if (account.tradeToken == address(0)) {       // adding a new gem token
             require(use, "ccm-chief-lock-gem-not-approved");
-            assert(acct.own == 0);          // If this is false, we're in trouble
-            require(vault.take(gem, msg.sender, amt));
-            acct.gem = gem;
-            acct.own = amt;
+            assert(account.tradeBalance == 0);          // If this is false, we're in trouble
+            require(vault.take(token, msg.sender, amt)); //TODO: reentrancy
+            account.tradeToken = token;
+            account.tradeBalance = amt;
             return true;
         }
 
@@ -392,73 +398,81 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     }
 
     // toggle approved acct managers
-    function meet(address who, address pal, bool yes) external returns (bool) {
+    // togglePal()
+    function togglePal(address exec, address pal, bool approve) external returns (bool) {
         // accts[keccak256(abi.encodePacked(who, msg.sender))].pals[pal] = yes;
-        accts[keck(who, msg.sender)].pals[pal] = yes;
+        accounts[getHash(exec, msg.sender)].pals[pal] = approve;
         return true;    // Note: return true on sucess, not new pals[pal]
     }
 
     // Set the contract-wide due token
-    function mdue(address due) external returns (bool) {
+    // setExecDueToken
+    function setExecDueToken(address dueToken) external returns (bool) {
         // _due can't be zero
-        require(due != address(0), "ccm-chief-mdue-token-invalid");
+        require(dueToken != address(0), "ccm-chief-mdue-token-invalid");
         // can't change due token
-        require(mamas[msg.sender].due == address(0), "ccm-chief-mdue-already-set");
+        require(execParams[msg.sender].dueToken == address(0), "ccm-chief-mdue-already-set");
         // set due
-        mamas[msg.sender].due = due;
+        execParams[msg.sender].dueToken = dueToken;
     } 
 
     // Claim your payout
-    function pull(address gem, uint256 amt) external returns (bool) {
-        return vault.give(gem, msg.sender, amt);
+    // claim(), withdraw()
+    function claim(address token, uint256 amt) external returns (bool) {
+        return vault.give(token, msg.sender, amt);
     }
 
     // add an Asset to mamas
-    function mama(
+    // addExecAsset
+    function addExecAsset(
         uint256 tax,   // interest rate charged on tab - .....   
-        uint256 mat,   // minimum collateralization ratio, as a ray
-        uint256 axe,   // liquidation penalty, as a ray
-        address gem    // address of the token to add
+        uint256 biteLimit,   // minimum collateralization ratio, as a ray
+        uint256 biteFee,   // liquidation penalty, as a ray
+        address token    // address of the token to add
     ) external returns (bool) {
-        return _ngem(tax, mat, axe, gem, address(0), true);        
+        return _addAsset(tax, biteLimit, biteFee, token, address(0), true);        
     }
+
     // Add an Asset to a specific account
-    function baby(
+    // addAccountAsset
+    function addAccountAsset(
         uint256 tax,   // interest rate charged on swapped collateral   
-        uint256 mat,   // minimum collateralization ratio, as a ray
-        uint256 axe,   // liquidation penalty, as a ray
-        address gem,   // address of the token to add
-        address lad    // address of the holder / payer
+        uint256 biteLimit,   // minimum collateralization ratio, as a ray
+        uint256 biteFee,   // liquidation penalty, as a ray
+        address token,   // address of the token to add
+        address user    // address of the holder / payer
     ) external returns (bool) {
-        return _ngem(tax, mat, axe, gem, lad, false);
+        return _addAsset(tax, biteLimit, biteFee, token, user, false);
     }
+
     // Open an account
     function open(
-        uint256 tab,   // Collateral amount, denominated in _due token
-        uint256 zen,
-        address lad,   // Address of the payer TODO: can't be msg.sender?
-        address due,   // Address of the token to pay out in
-        bool    mom    // If true, use contract-wide Asset Params. else, set below
+        uint256 dueTab,   // Collateral amount, denominated in _due token
+        uint256 callTime,
+        address user,   // Address of the payer TODO: can't be msg.sender?
+        address dueToken,   // Address of the token to pay out in
+        bool    useExecParams    // If true, use contract-wide Asset Params. else, set below
     ) external nonReentrant returns (bool) {
-        return _open(tab, zen, lad, due, mom);
+        return _open(dueTab, callTime, user, dueToken, useExecParams);
     }
     // Open an account that will use mama params
     function open(
-        uint256 tab, 
-        uint256 zen, 
-        address lad
+        uint256 dueTab, 
+        uint256 callTime, 
+        address user
     ) 
         external nonReentrant returns (bool) 
     {
-        return _open(tab, zen, lad, address(0), true);
+        return _open(dueTab, callTime, user, address(0), true);
     }
 
     // toggle mama asset on and off
     // can't do this for an acct bc they have already agreed to the terms
     // _gem - which gem to toggle
-    function bump(address gem, bool use) external returns (bool) {
-        if (mamas[msg.sender].gems[gem].mat > RAY) {return false;}
-        mamas[msg.sender].gems[gem].use = use;
+    // toggleExecAsset()
+    function toggleExecAsset(address token, bool use) external returns (bool) {
+        if (execParams[msg.sender].tokens[token].biteLimit > RAY) {return false;}
+        execParams[msg.sender].tokens[token].use = use;
         return true;
     }
 
@@ -467,56 +481,56 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     // External Getters
     /////////////
     // stack to deep error if return everything at once
-    function acctUints(address who, address lad)
+    function accountUints(address exec, address user)
         external
         view
-        returns (uint era, uint tab, uint bal, uint own, uint zen, uint ohm)
+        returns (uint lastAccrual, uint dueTab, uint dueBalance, uint tradeBalance, uint callTime, uint callTab)
         // returns (uint, uint, uint, uint, uint, uint)
     {
         // Acct memory acct = accts[keccak256(abi.encodePacked(who, lad))];
-        Acct memory acct = accts[keck(who, lad)];
-        era = acct.era;
-        tab = acct.tab;
-        bal = acct.bal;
-        own = acct.own;
-        zen = acct.zen;
-        ohm = acct.ohm;
+        Account memory account = accounts[getHash(exec, user)];
+        lastAccrual = account.lastAccrual;
+        dueTab = account.dueTab;
+        dueBalance = account.dueBalance;
+        tradeBalance = account.tradeBalance;
+        callTime = account.callTime;
+        callTab = account.callTab;
         
         // State state = acct.state;
         // return (_era, _tab, _bal, _val, _zen, _ohm);
     }
 
-    function acctState(address _who, address _lad) external view returns (State) {
+    function accountState(address _exec, address _user) external view returns (State) {
         // return accts[keccak256(abi.encodePacked(who, lad))].state;
-        return accts[keck(_who, _lad)].state;
+        return accounts[getHash(_exec, _user)].state;
     }
 
-    function acctAddresses(address _who, address _lad)
+    function accountAddresses(address _exec, address _user)
         external
         view
-        returns (address who, address due, address gem)
+        returns (address exec, address dueToken, address tradeToken)
     {
         // Acct memory acct = accts[keccak256(abi.encodePacked(_who, _lad))];
-        Acct memory acct = accts[keck(_who, _lad)];
-        who = acct.who; // TODO: don't need this after testing
-        due = acct.due;
-        gem = acct.gem;
+        Account memory account = accounts[getHash(_exec, _user)];
+        exec = account.exec; // TODO: don't need this after testing
+        dueToken = account.dueToken;
+        tradeToken = account.tradeToken;
     }
 
-    function acctBools(address _who, address _lad) 
+    function accountBools(address _exec, address _user) 
         external
         view 
-        returns (bool mom, bool opt)
+        returns (bool useExecParams, bool useAuction)
     {
         // Acct memory acct = accts[keccak256(abi.encodePacked(who, lad))];
-        Acct memory acct = accts[keck(_who, _lad)];
-        mom = acct.mom;
-        opt = acct.opt;
+        Account memory account = accounts[getHash(_exec, _user)];
+        useExecParams = account.useExecParams;
+        useAuction = account.useAuction;
     } 
 
-    function pals(address _who, address _lad, address _pal) external view returns (bool) {
+    function pals(address _exec, address _user, address _pal) external view returns (bool) {
         // return accts[keccak256(abi.encodePacked(who, lad))].pals[pal];
-        return accts[keck(_who, _lad)].pals[_pal];
+        return accounts[getHash(_exec, _user)].pals[_pal];
     }
 
     ///////Math
@@ -532,11 +546,13 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     // } 
 
     // could make this public for ease of use?
-    function grow(uint amt, uint rate, uint age) internal pure returns (uint256) {
-        return rmul(amt, rpow(rate, age));
+    // accrueInterest(), accrue(), 
+    function accrueInterest(uint principal, uint rate, uint age) internal pure returns (uint256) {
+        return rmul(principal, rpow(rate, age));
     }
 
-    function keck(address _A, address _B) internal pure returns (bytes32) {
+    // gethash(), getkeccak, getSha3
+    function getHash(address _A, address _B) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(_A, _B));
     }
 
@@ -547,19 +563,19 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     //     _;
     // }
     function file(bytes32 pair, bytes32 what, uint data) external note {
-        require(msg.sender == pairs[pair].scout, "ccm-chief-auth");
-        if (what == "val") pairs[pair].val = data;
+        require(msg.sender == tokenPairs[pair].spotter, "ccm-chief-auth");
+        if (what == "spotPrice") tokenPairs[pair].spotPrice = data;
     }
     function file(bytes32 pair, bytes32 what, bool data) external note onlyOwner {
-        if (what == "use") pairs[pair].use = data;
+        if (what == "use") tokenPairs[pair].use = data;
     }
     function file(bytes32 pair, bytes32 what, address data) external note onlyOwner {
-        if (what == "scout") pairs[pair].scout = data;
+        if (what == "spotter") tokenPairs[pair].spotter = data;
     }
     function file(bytes32 what, uint data) external note onlyOwner {
-        if (what == "max_tax") max_tax = data;
-        if (what == "max_tab") max_tab = data;
-        if (what == "min_tab") min_tab = data;
+        if (what == "maxTax") maxTax = data;
+        if (what == "maxTab") maxTab = data;
+        if (what == "minTab") minTab = data;
     }
     function file(bytes32 what, address data) external note onlyOwner {
         if (what == "vault") vault = Vault(data);

@@ -17,13 +17,12 @@ contract Proxy is DSMath {
 
     // Transfer tokens between addresses. 'dumb' implementation that can
     // only be called by the Vault contract
-    // deal, pass
-    function deal(address gem, address src, address dst, uint amt)
+    function deal(address token, address sender, address recipient, uint amt)
         external 
         onlyVault 
         returns (bool)
     {
-        return IERC20(gem).transferFrom(src, dst, amt);
+        return IERC20(token).transferFrom(sender, recipient, amt);
     }
 
     // TODO: Remove

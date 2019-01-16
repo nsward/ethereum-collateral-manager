@@ -13,20 +13,20 @@ contract ChiefLike {
     function file(bytes32, bytes32, uint) external;
 }
 
-contract ValueLike {
+contract OracleLike {
     function peek() public returns (bytes32, bool);
 }
 
 contract Scout is Ownable, DSMath {
     ChiefLike public chief;
-    ValueLike public value;
+    OracleLike public oracle;
     bytes32   public pair;
     //bool      public inv;   // inverse oracle value?
 
     // --- Init ---
-    constructor(address _chief, address _value, bytes32 _pair) public {
+    constructor(address _chief, address _oracle, bytes32 _pair) public {
         chief = ChiefLike(_chief);
-        value = ValueLike(_value);
+        oracle = OracleLike(_oracle);
         pair = _pair;
     }
 
@@ -38,8 +38,8 @@ contract Scout is Ownable, DSMath {
     // }
 
     // --- Administration ---
-    function file(bytes32 what, address _value) public onlyOwner {
-        if (what == "value") value = ValueLike(_value);
+    function file(bytes32 what, address _oracle) public onlyOwner {
+        if (what == "oracle") oracle = OracleLike(_oracle);
     }
     // function file(bytes32 what, bool _inv) public onlyOwner {
     //     if (what == "inv") inv = _inv;
@@ -52,15 +52,15 @@ contract Scout is Ownable, DSMath {
     // --- Update value ---
     // TODO: check
     function poke() public {
-        (bytes32 spot, bool ok) = value.peek();
-        if (ok) { chief.file(pair, "val", price(uint(spot))); }
+        (bytes32 val, bool ok) = oracle.peek();
+        if (ok) { chief.file(pair, "spotPrice", price(uint(val))); }
     }
 
     // This 'price function' will be different for every spotter depending
     // on the format that the price feed is read from the medianizer in.
     // This function, for example, will take ETH.USD price feed and return
     // usd / 1 Eth
-    function price(uint spot) internal pure returns (uint) {
-        return spot;
+    function price(uint val) internal pure returns (uint) {
+        return val;
     }
 }

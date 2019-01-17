@@ -3,7 +3,6 @@ pragma solidity ^0.5.2;
 import "../lib/DSMath.sol";
 import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
 
-
 // modeled after https://github.com/dydxprotocol/protocol/blob/master/contracts/margin/TokenProxy.sol
 contract Proxy is DSMath {
     
@@ -24,15 +23,4 @@ contract Proxy is DSMath {
     {
         return IERC20(token).transferFrom(sender, recipient, amt);
     }
-
-    // TODO: Remove
-    // // Check how much we can transfer from another address to our address
-    // function ours(address _gem, address src) external view returns (uint) {
-    //     IERC20 gem = IERC20(_gem);
-    //     // uint allowance = gem.allowance(src, address(this))
-    //     // uint theirBalance = gem.balanceOf(src);
-        
-    //     // minimum of user's allowance to us and their token balance
-    //     return min(gem.allowance(src, address(this), gem.balanceOf(src));
-    // }
 }

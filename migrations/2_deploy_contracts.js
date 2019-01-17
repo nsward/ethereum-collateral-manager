@@ -30,7 +30,8 @@ module.exports = async function(deployer, network, accounts) {
     const chief = await ChiefContract.deployed();
 
     // Pass chief and proxy addresses to vault contract
-    await vault.initAuthContracts(chief.address, proxy.address, {from:owner});
+    await vault.file(web3.utils.toHex("chief"), chief.address, {from:owner});
+    await vault.file(web3.utils.toHex("proxy"), proxy.address, {from:owner});
 
     // deploy the medianizer. These will ultimately be already-deployed 
     // MakerDao medianizers

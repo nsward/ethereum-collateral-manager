@@ -2,10 +2,6 @@
 
 "If I had more time, I would have written a shorter letter." - Blais Pascal
 
-* Need a new name for CollateralVault
-investing vault, some play on a double life, relevant words in a different language
-- kind of equivalent to the collateral 'tub' in dai system?
-
 # Dai Questions:
 - Why moving to auctions instead of boom/bust spread? -- distrust of oracles?
 

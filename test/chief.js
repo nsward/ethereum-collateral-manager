@@ -2,9 +2,9 @@ const ChiefContract = artifacts.require('../contracts/Chief');
 const VaultContract = artifacts.require('../contracts/Vault');
 const ProxyContract = artifacts.require('../contracts/Proxy');
 const SpotterContract = artifacts.require("../contracts/Spotter.sol");
-const TokenContract = artifacts.require("openzeppelin-solidity/contracts/token/ERC20/ERC20Mintable.sol");
 const OracleContract = artifacts.require("../contracts/Oracle.sol");
 const TesterContract = artifacts.require('../contracts/test/Tester');
+const TokenContract = artifacts.require("openzeppelin-solidity/contracts/token/ERC20/ERC20Mintable.sol");
 
 // const BigNum = require('bignumber.js');
 const BN = require('bn.js');  // bad bignumber library that web3.utils returns
@@ -59,7 +59,10 @@ contract("Chief", function(accounts) {
     vault = await VaultContract.new({from:boss});
     proxy = await ProxyContract.new(vault.address, {from:boss});
     chief = await ChiefContract.new(vault.address, {from:boss});
-    await vault.initAuthContracts(chief.address, proxy.address); // Set vault auth addresses
+
+    // Set vault auth addresses
+    await vault.file(hex("chief"), chief.address);
+    await vault.file(hex("proxy"), proxy.address);
 
     // Tokens
     dueToken = await TokenContract.new({from:minter});
@@ -129,6 +132,9 @@ contract("Chief", function(accounts) {
   it("Check Chief with no mama params", async() => {
     const dueTab = ethToWei(10);  // 10 eth
     const callTime = 86400;       // 1 day
+    //const biteLimit = 1.5;
+    //const biteFee = 0;
+    //const lockAmt = dueTab * biteLimit; 
 
     await dueToken.approve(proxy.address, dueTab, {from:user});  // approve proxy
 
@@ -136,7 +142,7 @@ contract("Chief", function(accounts) {
     const openTx = await testc.open(dueTab, callTime, user, _due, false);
     const lastAccrual = (await web3.eth.getBlock(openTx.receipt.blockNumber)).timestamp;
 
-    const account = {
+    let account = {
       'exec': exec,  
       'dueToken': _due, 
       'tradeToken': ZERO_ADDR,
@@ -151,7 +157,9 @@ contract("Chief", function(accounts) {
       'user': user
     }
     
-    await checkAcct(chief, account);
+    await checkAcct(chief, account);  // Check that the account was opened correctly
+
+    //await chief.lock(exec, _due, )
 
   });
 

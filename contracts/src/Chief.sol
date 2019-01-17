@@ -7,31 +7,6 @@ import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-solidity/contracts/utils/ReentrancyGuard.sol";
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 
-// TODO return false when reasonable instead of reverting to allow managing contract to deal with shit
-
-// TODO 1/9
-// diagram out the flow between contracts -> esp. storage between chief and vault
-// Get the tester contract working (i.e. external contract for testing Chief)
-// Look into 0x proxy plans
-// - update interest before entering zen, then era + zen = liquidation time
-// What happens if we need to increase ohm while in zen?
-
-// TODO: need a max zen?
-    // bad things from a super high zen:
-    //  - could overflow endZen time in move(), but that would really
-    //  only stop the contract from moving money, which would be the case
-    //  anyway if their zen time overflows a uint256
-    //  - ?
-// - Add state enum and an amtDueAfterCall (owe?, ohm?) to Acct
-// - add a call() function to start zen without paying out
-// - if zen expires and you get bitten, axe won't go to keepers (they should be 
-//   able to bite, but managing contracts can't just wait until bitten, so they
-//   will call move() first sometimes. axe can't go to managing contract bc it
-//   would incentivize tricky acct management strategies. So it has to go to
-//   a burn pool. As long as we have a burn pool, let's add win and send
-//   axe - win to the burn pool too   
-
-// Ownable for setting oracle stuff - hopefully governance in the future
 contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
     enum State{ Par, Call, Bit, Old }
@@ -161,7 +136,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     uint256 public accountId;           // Incremented for keepers to find accounts
     uint256 public minTab = 1;          // not profitable for keepers to bite below this
     uint256 public maxTax = uint(-1);   // maximum interest rate
-    uint256 public maxTab = uint(-1);   // tab above which keepers can bite
+    //uint256 public maxTab = uint(-1);   // tab above which keepers can bite
     
     
     mapping (address => ExecParam) public execParams;   // Contract-wide Asset Paramaters
@@ -204,7 +179,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         }
 
         // Check that owed amt is valid
-        require(dueTab > minTab && dueTab < maxTab, "ccm-chief-open-tab-invalid");
+        require(dueTab > minTab, "ccm-chief-open-tab-invalid");
         // Grab the account
         bytes32 accountKey = getHash(msg.sender, user); 
         Account storage account = accounts[accountKey];
@@ -498,7 +473,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     }
     function file(bytes32 what, uint data) external note onlyOwner {
         if (what == "maxTax") maxTax = data;
-        if (what == "maxTab") maxTab = data;
+        //if (what == "maxTab") maxTab = data;
         if (what == "minTab") minTab = data;
     }
     function file(bytes32 what, address data) external note onlyOwner {
@@ -517,15 +492,17 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 // toggleExecAsset()    - disable a gem in execParams for future users
 //              - X disable a gem for specific acct as long as not currently held
 // move()               - pay out to specified address
+// call(amt)            - call user's account to start callTime
 // close()/settle()?    - set tab = 0, either leave user balance or transfer it to claim() balances
 //
 ////// User Functions:
 // lock()           - add either gem or due tokens
 // free()           - claim either gem or due tokens, as long as it stays safe
 // setSafeOrder()
+// cancelSafeOrder()?
 // togglePal()      - approve/unapprove a pal, talk,  
 // trade()          - use 0x order to trade due or gem for new gem, as long as it stays safe. Also, delete jet
-// claim()          - calls Vault.give(), pays out users         
+// claim()          - calls Vault.give(), pays out users      
 //
 ////// Keeper Functions:
 // accountId()      - implemented

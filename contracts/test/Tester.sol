@@ -2,6 +2,8 @@ pragma solidity ^0.5.2;
 
 import "../src/Chief.sol";
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
+// this import is just here so the ERC20Mintable contract compiles for testing
+import "openzeppelin-solidity/contracts/token/ERC20/ERC20Mintable.sol";
 
 // Contract used to test Chief contract
 contract Tester is Ownable {
@@ -12,29 +14,28 @@ contract Tester is Ownable {
     }
 
     function open(
-        uint    tab, 
-        uint    zen, 
-        address lad, 
-        address due,
-        bool    mom
+        uint    dueTab, 
+        uint    callTime, 
+        address user, 
+        address dueToken,
+        bool    useExecParams
     )
         public returns (bool)
     {
-        return chief.open(tab, zen, lad, due, mom);
+        return chief.open(dueTab, callTime, user, dueToken, useExecParams);
     }
 
     function open(
-        uint    tab,
-        uint    zen,
-        address lad
+        uint    dueTab,
+        uint    callTime,
+        address user
     )
         external returns (bool)
     {
-        return chief.open(tab, zen, lad);
+        return chief.open(dueTab, callTime, user);
     }
-
-    
-    function toggleExecAsset(address _gem, bool _use) external returns (bool) {
-        return chief.toggleExecAsset(_gem, _use);
+ 
+    function toggleExecAsset(address token, bool use) external returns (bool) {
+        return chief.toggleExecAsset(token, use);
     }
 }

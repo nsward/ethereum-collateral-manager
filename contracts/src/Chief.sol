@@ -68,69 +68,6 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         uint  lastAccrual;              // Time of last interest accrual
     }
 
-    // TODO: get lock() working(), then come back to this?
-    // or find a way to figure this out without gem balance?
-    // function safe(bytes32 acctKey) public view returns (bool) {
-    // // function safe(address a, address b) public view returns (uint) {
-    //     // literally just return whether adjusted collateral value > mat * tab
-    //     // where adjusted collateral value = bal + own * pairs[]
-    //     // return accts[keck(a, b)].tab;
-    //     Acct memory acct = accts[acctKey];
-    //     Asset memory asset = accts[acctKey].gems[accts[acctKey].gem];
-
-    //     uint debit = mul(grow(acct.tab, asset.tax, sub(now, acct.era)), asset.mat);
-
-    //     uint val = pairs[keck(acct.due, acct.gem)].val;
-    //     uint credit = add(acct.bal, mul(acct.own, val));    // wmul()?
-
-    //     // uint ownInDueToken = mul(acct.own, val);
-
-    //     return credit >= debit;
-    // }
-
-    // TODO: check check check this
-    // TODO: manage owe overflow here?
-    // function safe(address _who, address _lad) public view returns (bool) {
-    //     // if state is bit? or old, return true
-    //     //
-    //     // if state is zen:
-    //     // if Zen is over and bal < ohm, return false
-    //     // else, check the same stuff as par:
-    //     //
-    //     // if state is par:
-    //     // owe = grow(tab, tax, now - era)
-    //     // if owe > max_tab, return false
-    //     // held = bal + val converted into due token
-    //     // if held < owe * mat, return false
-    //     // else:
-    //     // return true?
-        
-    //     // Acct memory acct = accts[keccak256(abi.encodePacked(_who, _lad))];
-    //     Acct memory acct = accts[keck(_who, _lad)];
-
-    //     // TODO: return true if state is bit?
-    //     if (acct.state == State.Old || acct.state == State.Bit) {return true;}
-
-    //     uint age = sub(now, acct.era);
-
-    //     // TODO: Should not meeting ohm after Zen be unsafe?
-    //     //      - I think we should have a separate function for this?
-    //     // If state is Zen, Zen is over, and bal < ohm, unsafe
-    //     if (acct.state == State.Zen && age >= acct.zen) {   // TODO: this is all wrong. How can you check
-    //         uint owe = grow(acct.ohm, acct.tax, age);       // undercollateralization if Zen is expired?
-    //         if (owe > max_tab || acct.bal < owe) {
-    //             return false;
-    //         }
-    //     }   // TODO: this after some sleep
-
-    //     if (acct.state == State.Par) {
-
-    //     }
-
-        
-
-    // }
-
     // "the minimum amount you must lock in the cdp is 0.005 ether"
     // TODO: set these values
     uint256 public accountId;           // Incremented for keepers to find accounts
@@ -256,7 +193,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         // TODO: Make sure there's no way around this
         // Also, does just checking mat work?
         // require(!mama.use && mama.mat > 0, "collateral-vault-mama-gem-in-use");
-        require(asset.biteLimit > 0, "ccm-chief-ngem-gem-in-use");
+        require(asset.biteLimit == 0, "ccm-chief-ngem-gem-in-use"); // TODO
 
         asset.use = true;
         asset.tax = tax;
@@ -297,7 +234,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         }
 
         if (token == dueToken) {                    // topping up due token
-            require(vault.take(token, msg.sender, amt));
+            require(vault.take(token, msg.sender, amt), "ccm-chief-lock-transfer-failed");
             account.dueBalance = add(account.dueBalance, amt);
             return true;
         } 
@@ -309,9 +246,9 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         if (account.tradeToken == address(0)) {     // adding a new trade token
             require(use, "ccm-chief-lock-gem-not-approved");
             assert(account.tradeBalance == 0);  //TODO: require() here?
+            require(vault.take(token, msg.sender, amt), "ccm-chief-lock-transfer-failed");
             account.tradeToken = token;
             account.tradeBalance = amt;
-            require(vault.take(token, msg.sender, amt));
             return true;
         }
 
@@ -388,6 +325,28 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         return true;
     }
 
+
+    function safe(bytes32 accountKey) public view returns (bool) {
+        Account memory account = accounts[accountKey];
+        AssetClass memory trade = accounts[accountKey].tokens[account.tradeToken];
+
+        // if the due amount is held in due token, then account is safe
+        // regardless of biteLimit or interest charged
+        if (account.dueBalance >= account.dueTab) {
+            return true;
+        } else {
+            uint debit = rmul(
+                accrueInterest(account.dueTab, trade.tax, sub(now, account.lastAccrual)), 
+                trade.biteLimit
+            );
+
+            uint val = tokenPairs[getHash(account.dueToken, account.tradeToken)].spotPrice;
+            uint credit = add(account.dueBalance, mul(account.tradeBalance, val));    // wmul()?
+
+            return credit >= debit;
+        }
+    }
+
     /////////////
     // External Getters
     /////////////
@@ -430,6 +389,18 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         useExecParams = account.useExecParams;
         // useAuction = account.useAuction;
     } 
+
+    function accountAsset(address _exec, address _user, address _token) 
+        external
+        view
+        returns(bool use, uint tax, uint biteLimit, uint biteFee) 
+    {
+        AssetClass memory asset = accounts[getHash(_exec, _user)].tokens[_token];
+        use = asset.use;
+        tax = asset.tax;
+        biteLimit = asset.biteLimit;
+        biteFee = asset.biteFee;
+    }
 
     function pals(address _exec, address _user, address _pal) external view returns (bool) {
         return accounts[getHash(_exec, _user)].pals[_pal];

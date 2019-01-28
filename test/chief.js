@@ -6,7 +6,7 @@ const OracleContract = artifacts.require("../contracts/Oracle.sol");
 const TesterContract = artifacts.require('../contracts/test/Tester');
 const TokenContract = artifacts.require("openzeppelin-solidity/contracts/token/ERC20/ERC20Mintable.sol");
 
-// const BigNum = require('bignumber.js');
+const BigNum = require('bignumber.js');
 const BN = require('bn.js');  // bad bignumber library that web3.utils returns
 const chai = require('chai');
 const bnChai = require('bn-chai');
@@ -16,6 +16,9 @@ chai.use(bnChai(web3.utils.BN));
 //TODO: https://github.com/JoinColony/colonyNetwork/blob/develop/test/colony.js
 
 contract("Chief", function(accounts) {
+  
+  BigNum.config({ DECIMAL_PLACES: 27, POW_PRECISION: 100})
+
   // Test addresses
   const boss = accounts[0];     // owner of the system contracts
   const user = accounts[1];     // owner of the collateral position
@@ -45,15 +48,6 @@ contract("Chief", function(accounts) {
   let pairKey;    // keccak256(_due, _gem)
   let accountKey;
 
-    // Rep.USD
-    // $10.21 / 1 REP
-    // medianizer returns:         10139189884700000000
-    // pit.ilks[ilk].spot: 5964229343941176470588235294
-
-    // Eth.USd
-    // $129.69 / 1 Eth
-    // medianizer returns: 
-
   beforeEach("Instantiate Contracts", async() => {
     // Main contracts
     vault = await VaultContract.new({from:boss});
@@ -68,6 +62,7 @@ contract("Chief", function(accounts) {
     dueToken = await TokenContract.new({from:minter});
     tradeToken = await TokenContract.new({from:minter});
     await dueToken.mint(user, new BN(ethToWei(100000)), {from:minter}); // mint due tokens
+    await tradeToken.mint(user, new BN(ethToWei(100000)), {from:minter}); // mint trade tokens
     _due = dueToken.address;
     _trade = tradeToken.address;
 
@@ -75,17 +70,17 @@ contract("Chief", function(accounts) {
     oracle = await OracleContract.new(price0, has, {from:boss});
 
     // The scout. Takes the medianizer value for pair and pushes it into the Chief
-    pairKey = web3.utils.soliditySha3({t:'address', v:_due}, {t:'address', v:_trade});
+    pairKey = getHash(_due, _trade);
     spotter = await SpotterContract.new(chief.address, oracle.address, pairKey, {from:boss});
 
-    // approve trading pair and set scout
+    // approve trading pair and set spotter address
     await chief.methods['file(bytes32,bytes32,bool)'](pairKey, hex("use"), true);
     await chief.methods['file(bytes32,bytes32,address)'](pairKey, hex("spotter"), spotter.address);
 
     // Contract for testing. Simulates the collateral manager
     testc = await TesterContract.new(chief.address, {from:testBoss});
     exec = testc.address;
-    accountKey = web3.utils.soliditySha3({t:'address', v:exec}, {t:'address', v:user});
+    accountKey = getHash(exec, user);
   });
 
 
@@ -163,6 +158,30 @@ contract("Chief", function(accounts) {
 
   });
 
+  it("Check user functions", async() => {
+    const dueTab = ethToWei(10);        // 10 due tokens
+    const tradeBalance = ethToWei(5);   // 5 tradeTokens
+    const tax = 0;
+    const ten = new BigNum(10);
+    const biteLimit = (new BigNum(1.2)).times(ten.pow(27)).toFixed(0);
+    const biteFee = (new BigNum(1.1)).times(ten.pow(27)).toFixed(0)
+    const callTime = 86400;             // 1 day
+    console.log("biteLimit: ", biteLimit.toString())
+    await dueToken.approve(proxy.address, dueTab, {from:user});  // approve proxy
+    await tradeToken.approve(proxy.address, tradeBalance, {from:user});
+    await testc.open(dueTab, callTime, user, _due, false);
+    await testc.addAccountAsset(tax, biteLimit, biteFee, _trade, user);
+    // console.log("account.tokens[tradeToken]: ", await chief.accountAsset(exec, user, _trade));
+    await chief.lock(exec, _trade, tradeBalance, {from:user});
+
+    const safe = await chief.safe(accountKey);
+    console.log("chief.safe(): ", safe);
+    // console.log("chief.safe() credit: ", safe[0].toString());
+    // console.log("chief.safe() debit:  ", safe[1].toString());
+
+    console.log("acct uints: ", await chief.accountUints(exec, user));
+  });
+
 
   it("Check oracle stuff", async() => {
     const dueTab = ethToWei(10);  // 10 eth
@@ -183,8 +202,8 @@ contract("Chief", function(accounts) {
     await dueToken.approve(proxy.address, dueTab, {from:user});  // approve proxy
     await testc.open(dueTab, callTime, user, _due, false);
 
-    console.log("exchange rate: ", (await chief.tokenPairs(pairKey)).spotPrice.toString()); 
-    console.log("acctKey: ", accountKey);
+    // console.log("exchange rate: ", (await chief.tokenPairs(pairKey)).spotPrice.toString()); 
+    // console.log("acctKey: ", accountKey);
     // console.log("cAcctKey: ", await chief.foo(who, user))
     // const safe = await chief.safe(accountKey);
     // console.log("safe()[0]: ", safe[0].toString());
@@ -226,6 +245,13 @@ function bn(num) {
 
 function getBlockTime() {
 
+}
+
+function getHash(addr1, addr2) {
+  return web3.utils.soliditySha3(
+    {type: 'address', value: addr1},
+    {type: 'address', value: addr2}
+  );
 }
 
 function ethToWei(val) {

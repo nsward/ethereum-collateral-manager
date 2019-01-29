@@ -133,6 +133,8 @@ contract("Chief", function(accounts) {
 
     await dueToken.approve(proxy.address, dueTab, {from:user});  // approve proxy
 
+    // allow tester contract to take dueTab from user
+    await chief.setAllowance(exec, user, dueTab, {from:user});
     // Open an account without mama params
     const openTx = await testc.open(dueTab, callTime, user, _due, false);
     const lastAccrual = (await web3.eth.getBlock(openTx.receipt.blockNumber)).timestamp;
@@ -158,7 +160,7 @@ contract("Chief", function(accounts) {
 
   });
 
-  it("Check user functions", async() => {
+  it("Check safe function", async() => {
     const dueTab = ethToWei(10);        // 10 due tokens
     const tradeBalance = ethToWei(5);   // 5 tradeTokens
     const tax = 0;
@@ -169,10 +171,11 @@ contract("Chief", function(accounts) {
     console.log("biteLimit: ", biteLimit.toString())
     await dueToken.approve(proxy.address, dueTab, {from:user});  // approve proxy
     await tradeToken.approve(proxy.address, tradeBalance, {from:user});
+    await chief.setAllowance(exec, user, dueTab, {from:user});
     await testc.open(dueTab, callTime, user, _due, false);
     await testc.addAccountAsset(tax, biteLimit, biteFee, _trade, user);
     // console.log("account.tokens[tradeToken]: ", await chief.accountAsset(exec, user, _trade));
-    await chief.lock(exec, _trade, tradeBalance, {from:user});
+    await chief.lock(accountKey, _trade, tradeBalance, {from:user});
 
     const safe = await chief.safe(accountKey);
     console.log("chief.safe(): ", safe);
@@ -200,6 +203,7 @@ contract("Chief", function(accounts) {
     // console.log("newVal: ", newVal)
     // expect((await chief.pairs(pairKey)).val).to.eq.BN(newVal);
     await dueToken.approve(proxy.address, dueTab, {from:user});  // approve proxy
+    await chief.setAllowance(exec, user, dueTab, {from:user});
     await testc.open(dueTab, callTime, user, _due, false);
 
     // console.log("exchange rate: ", (await chief.tokenPairs(pairKey)).spotPrice.toString()); 

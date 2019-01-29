@@ -59,6 +59,9 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
         // Set by user
         //bool    useAuction;           // opt-in to dutch auction - should be external service
+        address user;                   // address of user / trader / payer
+        uint    allowance;              // must be set by user before open(). Prevents malicious
+                                        // contract from taking token allowances made to this contract
         uint    tradeBalance;           // trading token balance. denominated in the trading token
         address tradeToken;             // trading token currently held
         Order   safeOrder;              // default order to take if called
@@ -68,12 +71,14 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         uint  lastAccrual;              // Time of last interest accrual
     }
 
-    // "the minimum amount you must lock in the cdp is 0.005 ether"
     // TODO: set these values
-    uint256 public accountId;           // Incremented for keepers to find accounts
-    uint256 public minTab = 1;          // not profitable for keepers to bite below this
-    uint256 public maxTax = uint(-1);   // maximum interest rate
-    //uint256 public maxTab = uint(-1);   // tab above which keepers can bite
+    uint256 public accountId;               // Incremented for keepers to find accounts
+    // TODO: should be able to have a tab below this, but unable to trade due token 
+    // for other tokens, bc the only danger of having a small amt in the acct is
+    // getting keepers to bite it
+    uint256 public minTab = 0.005 ether;    // not profitable for keepers to bite below this. TODO: this is just based on the dai cdp minimum. Need to determine what this should be
+    uint256 public maxTax = uint(-1);       // maximum interest rate
+    //uint256 public maxTab = uint(-1);     // tab above which keepers can bite
     
     
     mapping (address => ExecParam) public execParams;   // Contract-wide Asset Paramaters
@@ -87,6 +92,21 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     constructor(address _vault) public {
         vault = Vault(_vault);
     }
+
+
+    function trade(bytes32 accountKey) external returns (bool) {
+        // take an order, execute the trade, update balances, and check safe
+
+        require(safe(accountKey), "ccm-chief-trade-resulting-position-unsafe");
+    }
+
+    
+    // return callTime or callTime + now?
+    function call(address user) external returns (uint) {}
+
+    
+
+
 
     // called by the managing contract
     // if _mom == true, _due should be 0
@@ -122,6 +142,8 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         Account storage account = accounts[accountKey];
         // Check that account doesn't exist already. TODO: check who too?
         require(account.lastAccrual == 0, "ccm-chief-open-account-exists");
+        // Check that exec contract is allowed to take funds from user
+        require(account.allowance >= dueTab, "ccm-chief-open-insufficient-allowance");
         // Add id to accountKeys and increment acctId
         accountKeys[accountId] = accountKey;
         accountId = add(accountId, 1); 
@@ -136,6 +158,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         require(vault.take(dueToken, user, dueTab), "ccm-chief-open-take-failed");
         // TODO
         account.dueBalance = dueTab;
+        account.allowance = sub(account.allowance, dueTab);
 
         return true;       
     }
@@ -188,7 +211,6 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         // trade token must be an approved token pair with due
         require(tokenPairs[getHash(dueToken, token)].use, "ccm-chief-ngem-token-pair-invalid");
 
-        // TODO: mama.mat>0 very important, 
         // prevents editing params after setting use to false. 
         // TODO: Make sure there's no way around this
         // Also, does just checking mat work?
@@ -212,20 +234,48 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     // External Functions
     ////////////
 
+    // Sets account allowance, can only be called by the user of the account
+    // or an approved pal. Prevents an attack where anyone could monitor the
+    // approval events from popular ERC20s waiting for approvals to this contract,
+    // then call open() from a malicious contract and effectively steal all
+    // approved funds 
+    function setAllowance(address exec, address user, uint allowance) external returns (bool) {
+        bytes32 accountKey = getHash(exec, user);
+        require(
+            msg.sender == user ||
+            accounts[accountKey].pals[msg.sender],
+            "ccm-chief-approve-unauthorized"
+        );
+
+        accounts[accountKey].allowance = allowance;
+    }
+
+    // TODO: add user param to allow pals to call
+    // TODO: takeAddress is unsafe because anyone can add a take address
+    // that has an unlimited approval for this contract
     function lock(
-        address exec, 
+        bytes32 accountKey,
         address token, 
         uint256 amt
     ) 
         external nonReentrant returns (bool) 
     {    
-        require(exec != address(0) && token != address(0) && amt > 0, "ccm-chief-lock-invalid-inputs");
+        require(token != address(0) && amt > 0, "ccm-chief-lock-invalid-inputs");
 
-        Account storage account = accounts[getHash(exec, msg.sender)];
+        Account storage account = accounts[accountKey];
+
+        // TODO: need this?
+        // require(
+        //     msg.sender == account.user ||
+        //     account.pals[msg.sender],
+        //     "ccm-chief-lock-unauthorized"
+        // );
+
         address dueToken;
         bool use;
 
         if (account.useExecParams) {                // use exec params
+            address exec = account.exec;
             dueToken = execParams[exec].dueToken;
             use = execParams[exec].tokens[token].use;
         } else {                                    // use acct params
@@ -238,27 +288,31 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
             account.dueBalance = add(account.dueBalance, amt);
             return true;
         } 
-        if (token == account.tradeToken) {          // topping up trade token
+        else if (token == account.tradeToken) {          // topping up trade token
             require(vault.take(token, msg.sender, amt)); 
             account.tradeBalance = add(account.tradeBalance, amt);
             return true;
         }
-        if (account.tradeToken == address(0)) {     // adding a new trade token
+        else if (account.tradeToken == address(0)) {     // adding a new trade token
             require(use, "ccm-chief-lock-gem-not-approved");
             assert(account.tradeBalance == 0);  //TODO: require() here?
             require(vault.take(token, msg.sender, amt), "ccm-chief-lock-transfer-failed");
             account.tradeToken = token;
             account.tradeBalance = amt;
             return true;
+        } else {
+            revert("ccm-chief-lock-invalid-token");
         }
 
-        return false;   // user submitted an invalid _gem address. revert here?
+        // revert("ccm-chief-lock-invalid-token");
+        // return false;   // user submitted an invalid _gem address. revert here?
     }
 
     // toggle approved acct managers
-    function togglePal(address exec, address pal, bool approve) external returns (bool) {
-        accounts[getHash(exec, msg.sender)].pals[pal] = approve;
-        return true;    // Note: returns true on sucess, not new pals[pal]
+    function togglePal(bytes32 accountKey, address pal, bool trusted) external returns (bool) {
+        require(msg.sender == accounts[accountKey].user, "ccm-chief-togglePal-unauthorized");
+        accounts[accountKey].pals[pal] = trusted;
+        return true;    // Note: returns true on sucess, not the new pals[pal] value
     }
 
     // Set the contract-wide due token
@@ -272,7 +326,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     } 
 
     // Claim your payout
-    function claim(address token, uint256 amt) external returns (bool) {
+    function claim(address token, uint256 amt) external nonReentrant returns (bool) {
         return vault.give(token, msg.sender, amt);
     }
 
@@ -328,7 +382,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
     function safe(bytes32 accountKey) public view returns (bool) {
         Account memory account = accounts[accountKey];
-        AssetClass memory trade = accounts[accountKey].tokens[account.tradeToken];
+        AssetClass memory asset = accounts[accountKey].tokens[account.tradeToken];
 
         // if the due amount is held in due token, then account is safe
         // regardless of biteLimit or interest charged
@@ -336,8 +390,8 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
             return true;
         } else {
             uint debit = rmul(
-                accrueInterest(account.dueTab, trade.tax, sub(now, account.lastAccrual)), 
-                trade.biteLimit
+                accrueInterest(account.dueTab, asset.tax, sub(now, account.lastAccrual)), 
+                asset.biteLimit
             );
 
             uint val = tokenPairs[getHash(account.dueToken, account.tradeToken)].spotPrice;
@@ -456,24 +510,24 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
 // State altering functions
 ////// Managing Contract Functions:
-// open()               - implemented
-// addExecDueToken()    - add initial due to execParams
-// addExecAsset()       - add an Asset to execParams
-// addAcountAsset()     - add an Asset to specific acct
-// toggleExecAsset()    - disable a gem in execParams for future users
+// open()               - open an account, called by exec contract, implemented
+// setExecDueToken()    - add initial due to execParams, implemented
+// addExecAsset()       - add an Asset to execParams, implemented
+// addAcountAsset()     - add an Asset to specific acct, implemented
+// toggleExecAsset()    - disable a gem in execParams for future users, implemented
 //              - X disable a gem for specific acct as long as not currently held
 // move()               - pay out to specified address
 // call(amt)            - call user's account to start callTime
 // close()/settle()?    - set tab = 0, either leave user balance or transfer it to claim() balances
 //
 ////// User Functions:
-// lock()           - add either gem or due tokens
+// lock()           - add either gem or due tokens, implemented
 // free()           - claim either gem or due tokens, as long as it stays safe
 // setSafeOrder()
 // cancelSafeOrder()?
-// togglePal()      - approve/unapprove a pal, talk,  
+// togglePal()      - approve/unapprove a pal, implemented
 // trade()          - use 0x order to trade due or gem for new gem, as long as it stays safe. Also, delete jet
-// claim()          - calls Vault.give(), pays out users      
+// claim()          - calls Vault.give(), pays out users, implemented   
 //
 ////// Keeper Functions:
 // accountId()      - implemented

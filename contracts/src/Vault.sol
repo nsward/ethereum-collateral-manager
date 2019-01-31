@@ -1,6 +1,6 @@
 pragma solidity ^0.5.2;
 
-import "./Proxy.sol";
+import "./Interfaces/ProxyLike.sol";
 import "../lib/DSMath.sol";
 import "../lib/DSNote.sol";
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
@@ -10,7 +10,7 @@ import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
 contract Vault is Ownable, DSMath, DSNote {
 
     // address public PROXY;
-    Proxy   public proxy;
+    ProxyLike public proxy;
     address public chief;
 
     modifier onlyChief() {require(msg.sender == chief, "ccm-vault-auth");_;}
@@ -27,10 +27,10 @@ contract Vault is Ownable, DSMath, DSNote {
     mapping (address => uint) public chest;
 
     // Transfer tokens from user to us
-    function take(address gem, address src, uint amt) external onlyChief returns (bool) {
-        require(proxy.deal(gem, src, address(this), amt), "ccm-vault-take-deal-failed");
-        chest[gem] = add(chest[gem], amt);
-        verifyBalance(gem);
+    function take(address _gem, address src, uint amt) external onlyChief returns (bool) {
+        require(proxy.deal(_gem, src, address(this), amt), "ccm-vault-take-deal-failed");
+        chest[_gem] = add(chest[_gem], amt);
+        verifyBalance(_gem);
         return true;
     }
 
@@ -50,14 +50,31 @@ contract Vault is Ownable, DSMath, DSNote {
     }
 
     // Add to user's claim balance
-    function addClaim(address gem, address lad, uint amt) external onlyChief {
-        claims[lad][gem] = add(claims[lad][gem], amt);
+    function addClaim(address _gem, address lad, uint amt) external onlyChief {
+        claims[lad][_gem] = add(claims[lad][_gem], amt);
     }
 
     // Verify that nothing has gone crazy
-    function verifyBalance(address gem) private view {
+    function verifyBalance(address _gem) private view {
         // If this is false, we have big problems
-        assert(IERC20(gem).balanceOf(address(this)) >= chest[gem]);
+        assert(IERC20(_gem).balanceOf(address(this)) >= chest[_gem]);
+    }
+
+
+    function giveToWrapper(address _gem, address dst, uint amt) external onlyChief returns (bool) {
+        chest[_gem] = sub(chest[_gem], amt);
+        IERC20 gem = IERC20(_gem);
+        require(gem.transfer(dst, amt), "ccm-vault-giveToWrapper-transfer-failed");
+        verifyBalance(_gem);
+        return true;
+    }
+
+    function takeFromWrapper(address _gem, address src, uint amt) external onlyChief returns (bool) {
+        IERC20 gem = IERC20(_gem);
+        require(gem.transferFrom(src, address(this), amt), "ccm-vault-takeFromWrapper-transfer-failed");
+        chest[_gem] = add(chest[_gem], amt);
+        verifyBalance(_gem);
+        return true;
     }
 
     ///////////
@@ -65,20 +82,8 @@ contract Vault is Ownable, DSMath, DSNote {
     ///////////
 
     function file(bytes32 what, address data) external note onlyOwner {
-        if (what == "proxy") proxy = Proxy(data);
-        if (what == "chief") {
-            require(chief == address(0), "ccm-vault-init-no-new-chief");
-            chief = data;
-        }
+        if (what == "proxy") proxy = ProxyLike(data);
+        if (what == "chief") chief = data;
     }
-
-    // // Vault has to be deployed before Chief and Proxy, so no constructor
-    // // Use this to set other contract addresses
-    // function initAuthContracts(address _chief, address _proxy) external onlyOwner {
-    //     // Prevent owner from changing chief address
-    //     require(chief == address(0), "ccm-vault-init-no-new-chief");
-         
-    //     proxy = Proxy(_proxy);
-    // }
 
 }

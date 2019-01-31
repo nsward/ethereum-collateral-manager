@@ -1,9 +1,12 @@
 pragma solidity ^0.5.2;
 
-import "./Vault.sol";
+// import "./Vault.sol";
+import "./Interfaces/VaultLike.sol";
+import "./Interfaces/WrapperLike.sol";
 import "../lib/DSMath.sol";
 import "../lib/DSNote.sol";
-import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
+import "../lib/LibOrder.sol";
+// import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
 import "openzeppelin-solidity/contracts/utils/ReentrancyGuard.sol";
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 
@@ -11,28 +14,12 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
 
     enum State{ Par, Call, Bit, Old }
 
-    struct Order {
-        address makerAddress;           // Address that created the order.
-        address takerAddress;           // Address that is allowed to fill the order. If set to 0, any address is allowed to fill the order.
-        address feeRecipientAddress;    // Address that will recieve fees when order is filled.
-        address senderAddress;          // Address that is allowed to call Exchange contract methods that affect this order. If set to 0, any address is allowed to call these methods.
-        uint256 makerAssetAmount;       // Amount of makerAsset being offered by maker. Must be greater than 0.
-        uint256 takerAssetAmount;       // Amount of takerAsset being bid on by maker. Must be greater than 0.
-        uint256 makerFee;               // Amount of ZRX paid to feeRecipient by maker when order is filled. If set to 0, no transfer of ZRX from maker to feeRecipient will be attempted.
-        uint256 takerFee;               // Amount of ZRX paid to feeRecipient by taker when order is filled. If set to 0, no transfer of ZRX from taker to feeRecipient will be attempted.
-        uint256 expirationTimeSeconds;  // Timestamp in seconds at which order expires.
-        uint256 salt;                   // Arbitrary number to facilitate uniqueness of the order's hash.
-        bytes makerAssetData;           // ABIv2 encoded data that can be decoded by a specified proxy contract when transferring makerAsset.
-        bytes takerAssetData;           // ABIv2 encoded data that can be decoded by a specified proxy contract when transferring takerAsset.
-    }
-
     struct TokenPair {
         address spotter;    // fetches and sets the spot price
         uint spotPrice;     // Important note: does not incorporate mat like dai's spotter does
         bool use;           // approved for use 
         // spotPrice should be due tokens / 1 tradeToken
     }
-    
     struct AssetClass {
         bool use;       // approved for use
         uint tax;       // interest rate paid on quantity of collateral not held in dueToken
@@ -46,6 +33,15 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         address dueToken;                       // address of the ERC20 token to pay out in
         mapping (address => AssetClass) tokens; // tokenParams
     }
+    struct Order {
+        address wrapper;
+        address makerAsset;
+        address takerAsset;
+        uint makerAmt;
+        uint takerAmt;
+        uint fillAmt;
+        bytes orderData;
+    }
     struct Account {
         // Set by managing contract
         uint    callTab;                        // tab due at end of call
@@ -58,7 +54,6 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         mapping (address => AssetClass) tokens; // tokens that can be held as collateral and the parameters
 
         // Set by user
-        //bool    useAuction;           // opt-in to dutch auction - should be external service
         address user;                   // address of user / trader / payer
         uint    allowance;              // must be set by user before open(). Prevents malicious
                                         // contract from taking token allowances made to this contract
@@ -87,25 +82,249 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     mapping (bytes32 => TokenPair) public tokenPairs;   // keccak256(dueToken, tradeToken) => Token Pair
     mapping (uint256 => bytes32) public accountKeys;    // accountId => accountKey
 
-    Vault public vault;     // Address of the vault contract that holds funds
+    mapping (address => bool) public wrappers;  // valid exchange wrappers
+
+    VaultLike public vault;     // Address of the vault contract that holds funds
 
     constructor(address _vault) public {
-        vault = Vault(_vault);
+        vault = VaultLike(_vault);
     }
 
+    // TODO: contract won't deploy under block gas limit with bytecode size
+    // Potential structure:
+    // Chief, Vat -> data source, auth - protected, logicless writes
+    // User,  Broker  -> all user-facing functions, trader, debtor, payer
+    // Exec,  Admin  -> all exec contract facing functions, controller
+    // Keep,  Keeper  -> all keeper functions, keeper, monitor
+    // Proxy -> same stuff
+    // Vault -> same stuff 
 
-    function trade(bytes32 accountKey) external returns (bool) {
+    // How to handle reentrancy between contracts?
+    // if sticking with reentrancy locks, one option would be to make the chief
+    // external auth-restricted functions nonReentrant
+
+
+    // swap
+    // makerAmt and takerAmt give us the price the user intends to get, then
+    // fill Amt gives us the amt of takerToken user wants to sell. We need to do
+    // validations based on these values, update state, then pass these values
+    // to the exchange wrapper, which must revert if the expected values are not
+    // met (bc user could pass in diff values in orderData)
+    // Also, verify our balances in each token afterwards and require(safe())
+    function swap(
+        bytes32 accountKey,
+        address wrapper,
+        address makerAsset,
+        address takerAsset,
+        uint makerAmt,
+        uint takerAmt,
+        uint fillAmt,
+        bytes calldata orderData
+    )
+        external nonReentrant returns (bool) 
+    {
+        // TODO: delete safeOrder
+
         // take an order, execute the trade, update balances, and check safe
+        // we will always be taker
 
-        require(safe(accountKey), "ccm-chief-trade-resulting-position-unsafe");
+        // must be an approved wrapper
+        require(wrappers[wrapper], "ccm-chief-swap-invalid-wrapper");
+
+        // grab account
+        Account storage account = accounts[accountKey];
+
+        // get dueToken
+        address dueToken = account.useExecParams ?
+            execParams[account.exec].dueToken :
+            account.dueToken;
+
+        // TODO: might need to pull this into an internal / public function
+        // to remove this require when called to take safeOrder
+        // must be called by account user or authorized delegate
+        require(
+            msg.sender == account.user || account.pals[msg.sender],
+            "ccm-chief-swap-unauthorized"
+        );
+
+        // update account tab
+        _updateTab(account);
+
+        // we are getting maker asset and losing takerAsset
+
+        // cases:
+        // - giving up due token, getting a new trade token
+        // - giving up due token, getting more of our current trade token
+        // - giving up trade token, getting due token
+        // - giving up trade token, getting a new trade token
+
+        uint partialAmt = getPartialAmt(makerAmt, takerAmt, fillAmt);
+
+        // giving up due token
+        if (takerAsset == dueToken) {
+            if (makerAsset == account.tradeToken) {
+                // giving up due token, getting more of our current trade token
+                // update balances
+                account.dueBalance = sub(account.dueBalance, fillAmt);
+                account.tradeBalance = add(account.tradeBalance, partialAmt);
+            } else {
+                // giving up due token, getting a new trade token
+                require(account.tradeBalance == 0, "ccm-chief-swap-tradeToken-exists");
+                bool use = account.useExecParams ?
+                    execParams[account.exec].tokens[makerAsset].use :
+                    account.tokens[makerAsset].use;
+                require(use, "ccm-chief-swap-new-tradeToken-invalid-1");
+                account.dueBalance = sub(account.dueBalance, fillAmt);
+                account.tradeToken = makerAsset;
+                account.tradeBalance = partialAmt;
+            }
+        } else {
+            require(takerAsset == account.tradeToken, "ccm-chief-swap-invalid-trading-pair");
+            // giving up trade token
+
+            if (makerAsset == account.dueToken) {
+                // giving up trade token, getting due token
+                account.tradeBalance = sub(account.tradeBalance, fillAmt);
+                account.dueBalance = add(account.dueBalance, partialAmt);
+            } else {
+                // giving up trade token, getting a new trade token
+
+                // require new token approved
+                bool use = account.useExecParams ?
+                    execParams[account.exec].tokens[makerAsset].use :
+                    account.tokens[makerAsset].use;
+                require(use, "ccm-chief-swap-new-tradeToken-invalid-2");
+
+                // make sure we can cover the fillAmt. This is check by the DSMath sub()
+                // in every other case, but we must be explicit about it here
+                require(account.tradeBalance >= fillAmt, "ccm-chief-swap-insufficient-tradeBalance");
+
+                // figure out how to handle excess current tradeToken
+                // if fillAmt < tradeBalance -> we'll have some left over. Can we just add this to claims? or should we not allow this?
+                if (account.tradeBalance > fillAmt) {
+                    // add difference to claims
+                    vault.addClaim(
+                        account.tradeToken, 
+                        account.user, 
+                        sub(account.tradeBalance, fillAmt)
+                    );
+                }
+
+                account.tradeToken = makerAsset;
+                account.tradeBalance = partialAmt;
+            }
+        }
+
+        // make sure the account is still safe
+        require(safe(accountKey), "ccm-chief-swap-resulting-position-unsafe");
+
+        _executeTrade(
+            msg.sender, 
+            wrapper, 
+            makerAsset, 
+            takerAsset, 
+            makerAmt, 
+            takerAmt, 
+            fillAmt, 
+            orderData
+        );
     }
 
+
+    // function validateTrade() internal pure {}
+    // function updatePosition(Account storage account, ) internal {}
+
+    // reverts on failure
+    function _executeTrade(
+        address wrapper,
+        address tradeOrigin,
+        address makerAsset,
+        address takerAsset,
+        uint makerAmt,
+        uint takerAmt,
+        uint fillAmt,
+        bytes memory orderData
+    )
+        internal
+    {
+        // transfer funds to wrapper
+        vault.giveToWrapper(takerAsset, wrapper, fillAmt);
+
+        // Note that the actual implementation of this will be different for
+        // each exchange wrapper, but this will fill the order exactly as
+        // specified or revert the transaction
+        uint makerAmtReceived = WrapperLike(wrapper).fillOrKill(
+            tradeOrigin,
+            makerAsset,
+            takerAsset,
+            makerAmt,
+            takerAmt,
+            fillAmt,
+            orderData
+        );
+        
+        require(
+            makerAmtReceived >= getPartialAmt(makerAmt, takerAmt, fillAmt), 
+            "ccm-chief-executeTrade-fillOrKill-unsuccessful"
+        );
+
+        // transfer from exchange wrapper back to vault
+        // ** will need to make sure wrappers are all approving() sufficient amounts
+        vault.takeFromWrapper(
+            makerAsset, 
+            wrapper,
+            makerAmtReceived
+        );
+    }
+
+    // Returns the value of a partial fill given an implied price (makerAmt / takerAmt)
+    // and the fill amt
+    function getPartialAmt(uint makerAmt, uint takerAmt, uint fillAmt) 
+        internal 
+        pure 
+        returns (uint) 
+    {
+        // TODO: DSMath does not include a div function because solidity
+        // errors on div by 0. But, it doesn't revert, so leave this check
+        // for now
+        require(takerAmt > 0, "ccm-chief-getPartialAmt-div-by-zero");
+        return mul(makerAmt, fillAmt) / takerAmt;
+    }
+
+
+    function _updateTab(Account storage account) internal {
+        // Account storage account = accounts[accountKey];
+
+        // no time passed since last update
+        if (account.lastAccrual == now) { return; }
+
+        // no tax accrued
+        if (account.dueBalance >= account.dueTab) { 
+            account.lastAccrual = now; 
+            return;
+        }
+        
+        // get tax for the trade token
+        uint tax = account.useExecParams ?
+            execParams[account.exec].tokens[account.dueToken].tax :
+            account.tokens[account.dueToken].tax;
+
+        account.dueTab = accrueInterest(
+            sub(account.dueTab, account.dueBalance),
+            tax,
+            sub(now, account.lastAccrual)
+        );
+
+        account.lastAccrual = now;
+    }
+
+    function updateTab(bytes32 accountKey) public {
+        Account storage account = accounts[accountKey];
+        return _updateTab(account);
+    }
     
     // return callTime or callTime + now?
-    function call(address user) external returns (uint) {}
-
-    
-
+    function callAccount(address user) external returns (uint) {}
 
 
     // called by the managing contract
@@ -116,7 +335,9 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         address user,           // address of the payer TODO: can't be msg.sender?
         address dueToken,       // address of the token to pay out in
         bool    useExecParams   // if true, use exec asset params. else, set below
-    ) private returns (bool) {
+    ) 
+        private returns (bool) 
+    {
         // Account user can't be zero
         require(user != address(0), "ccm-chief-open-lad-invalid");
 
@@ -390,7 +611,11 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
             return true;
         } else {
             uint debit = rmul(
-                accrueInterest(account.dueTab, asset.tax, sub(now, account.lastAccrual)), 
+                accrueInterest(
+                    sub(account.dueTab, account.dueBalance),    // charge interest on amt not held in dueToken
+                    asset.tax, 
+                    sub(now, account.lastAccrual)
+                ), 
                 asset.biteLimit
             );
 
@@ -486,15 +711,15 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         require(msg.sender == tokenPairs[pair].spotter, "ccm-chief-auth"); 
         _;
     }
-    function file(bytes32 pair, bytes32 what, uint data) external note onlySpotter(pair) {
+    function file(bytes32 id, bytes32 what, uint data) external note onlySpotter(id) {
         //require(msg.sender == tokenPairs[pair].spotter, "ccm-chief-auth");
-        if (what == "spotPrice") tokenPairs[pair].spotPrice = data;
+        if (what == "spotPrice") tokenPairs[id].spotPrice = data;
     }
-    function file(bytes32 pair, bytes32 what, bool data) external note onlyOwner {
-        if (what == "use") tokenPairs[pair].use = data;
+    function file(bytes32 id, bytes32 what, bool data) external note onlyOwner {
+        if (what == "use") tokenPairs[id].use = data;
     }
-    function file(bytes32 pair, bytes32 what, address data) external note onlyOwner {
-        if (what == "spotter") tokenPairs[pair].spotter = data;
+    function file(bytes32 id, bytes32 what, address data) external note onlyOwner {
+        if (what == "spotter") tokenPairs[id].spotter = data;
     }
     function file(bytes32 what, uint data) external note onlyOwner {
         if (what == "maxTax") maxTax = data;
@@ -502,14 +727,17 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         if (what == "minTab") minTab = data;
     }
     function file(bytes32 what, address data) external note onlyOwner {
-        if (what == "vault") vault = Vault(data);
+        if (what == "vault") vault = VaultLike(data);
+        if (what == "wrapper") wrappers[data] = !wrappers[data];
     }
+    
 
 }
 
 
 // State altering functions
 ////// Managing Contract Functions:
+// openWithEth()?       -- exec can forward msg.value and we'll wrap it and store it
 // open()               - open an account, called by exec contract, implemented
 // setExecDueToken()    - add initial due to execParams, implemented
 // addExecAsset()       - add an Asset to execParams, implemented

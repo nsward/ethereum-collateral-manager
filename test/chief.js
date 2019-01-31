@@ -3,7 +3,7 @@ const VaultContract = artifacts.require('../contracts/Vault');
 const ProxyContract = artifacts.require('../contracts/Proxy');
 const SpotterContract = artifacts.require("../contracts/Spotter.sol");
 const OracleContract = artifacts.require("../contracts/Oracle.sol");
-const TesterContract = artifacts.require('../contracts/test/Tester');
+const TesterContract = artifacts.require('../contracts/testing/Tester');
 const TokenContract = artifacts.require("openzeppelin-solidity/contracts/token/ERC20/ERC20Mintable.sol");
 
 const BigNum = require('bignumber.js');

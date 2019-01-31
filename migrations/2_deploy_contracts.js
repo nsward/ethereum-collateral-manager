@@ -26,7 +26,7 @@ module.exports = async function(deployer, network, accounts) {
 
     // TODO: if proxy address in chief is just for getter. should delete in case it changes
     // deploy chief with proxy and vault addresses
-    await deployer.deploy(ChiefContract, vault.address)
+    await deployer.deploy(ChiefContract, vault.address, {gas:6000000})
     const chief = await ChiefContract.deployed();
 
     // Pass chief and proxy addresses to vault contract

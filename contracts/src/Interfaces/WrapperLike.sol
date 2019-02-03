@@ -1,14 +1,7 @@
-pragma solidity ^0.5.2;
+pragma solidity ^0.5.3;
 
 // interface for exchange wrapper contracts
 contract WrapperLike {
-    function fillOrKill(
-        address tradeOrigin,
-        address makerAsset,
-        address takerAsset,
-        uint makerAmt,
-        uint takerAmt,
-        uint fillAmt,
-        bytes calldata orderData
-    ) external returns (uint);
+    function fillOrKill(address, address, address, uint, uint, uint, bytes calldata) 
+        external returns (uint);
 }

@@ -5,7 +5,7 @@
 // different for each spotter depending on the format of the oracle
 // return value
 
-pragma solidity ^0.5.2;
+pragma solidity ^0.5.3;
 
 import "../../lib/DSMath.sol";
 import "openzeppelin-solidity/contracts/ownership/Ownable.sol";

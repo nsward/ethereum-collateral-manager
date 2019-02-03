@@ -2,6 +2,51 @@
 
 "If I had more time, I would have written a shorter letter." - Blais Pascal
 
+# Storage by contract
+Broker:
+    wrappers
+
+# Data breakdown by function
+
+Broker Functions
+## Swap()
+    Reads:
+        wrappers[wrapper]
+        dueToken
+        tradeToken
+        dueBalance
+        tradeBalance
+        use
+        account.user and pals
+    Writes:
+        updateTab()
+        dueBalance
+        tradeBalance
+        tradeToken
+        vault.addClaim
+
+Vat Functions
+## updateTab():
+    Reads:
+        lastAccrual
+        dueBalance
+        dueTab
+        useAdminParams
+        due
+
+Exec Functions
+
+
+
+
+
+
+
+
+
+
+
+
 # Dai Questions:
 - Why moving to auctions instead of boom/bust spread? -- distrust of oracles?
 

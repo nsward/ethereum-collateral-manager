@@ -1,4 +1,4 @@
-pragma solidity ^0.5.2;
+pragma solidity ^0.5.3;
 
 // This can ultimately be any oracle contract that the community decides
 // is trustworthy, and we can use different oracles for different token

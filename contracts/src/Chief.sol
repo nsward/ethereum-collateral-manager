@@ -1,4 +1,4 @@
-pragma solidity ^0.5.2;
+pragma solidity ^0.5.3;
 
 // import "./Vault.sol";
 import "./Interfaces/VaultLike.sol";
@@ -25,11 +25,10 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         uint tax;       // interest rate paid on quantity of collateral not held in dueToken
         uint biteLimit; // Minimum Collateralization Ratio as a ray
         uint biteFee;   // liquidation penalty as a ray
-        // add keeperReward, biteReward, bitePay? What do keepers get for biting?
-                
+        // add keeperReward, biteReward, bitePay? What do keepers get for biting? biteGap, biteSpread
     }
     // execParam, execPair, 
-    struct ExecParam {
+    struct AdminParam {
         address dueToken;                       // address of the ERC20 token to pay out in
         mapping (address => AssetClass) tokens; // tokenParams
     }
@@ -48,8 +47,8 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         uint    dueTab;                         // max payout amt 
         uint    dueBalance;                     // balance of due tokens currently held, denominated in due tokens
         uint    callTime;                       // time given for a call 
-        bool    useExecParams;                  // use exec-contract-wide paramaters 
-        address exec;                           // address of managing contract 
+        bool    useAdminParams;                  // use exec-contract-wide paramaters 
+        address admin;                           // address of managing contract 
         address dueToken;                       // address of the ERC20 token to pay out in
         mapping (address => AssetClass) tokens; // tokens that can be held as collateral and the parameters
 
@@ -76,7 +75,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     //uint256 public maxTab = uint(-1);     // tab above which keepers can bite
     
     
-    mapping (address => ExecParam) public execParams;   // Contract-wide Asset Paramaters
+    mapping (address => AdminParam) public adminParams;   // Contract-wide Asset Paramaters
     // Only internal bc of compiler complaint about nested structs. Need to create getter
     mapping (bytes32 => Account) internal accounts;     // keccak256(exec, user) => Account
     mapping (bytes32 => TokenPair) public tokenPairs;   // keccak256(dueToken, tradeToken) => Token Pair
@@ -135,8 +134,8 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         Account storage account = accounts[accountKey];
 
         // get dueToken
-        address dueToken = account.useExecParams ?
-            execParams[account.exec].dueToken :
+        address dueToken = account.useAdminParams ?
+            adminParams[account.admin].dueToken :
             account.dueToken;
 
         // TODO: might need to pull this into an internal / public function
@@ -170,8 +169,8 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
             } else {
                 // giving up due token, getting a new trade token
                 require(account.tradeBalance == 0, "ccm-chief-swap-tradeToken-exists");
-                bool use = account.useExecParams ?
-                    execParams[account.exec].tokens[makerAsset].use :
+                bool use = account.useAdminParams ?
+                    adminParams[account.admin].tokens[makerAsset].use :
                     account.tokens[makerAsset].use;
                 require(use, "ccm-chief-swap-new-tradeToken-invalid-1");
                 account.dueBalance = sub(account.dueBalance, fillAmt);
@@ -190,8 +189,8 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
                 // giving up trade token, getting a new trade token
 
                 // require new token approved
-                bool use = account.useExecParams ?
-                    execParams[account.exec].tokens[makerAsset].use :
+                bool use = account.useAdminParams ?
+                    adminParams[account.admin].tokens[makerAsset].use :
                     account.tokens[makerAsset].use;
                 require(use, "ccm-chief-swap-new-tradeToken-invalid-2");
 
@@ -305,8 +304,8 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         }
         
         // get tax for the trade token
-        uint tax = account.useExecParams ?
-            execParams[account.exec].tokens[account.dueToken].tax :
+        uint tax = account.useAdminParams ?
+            adminParams[account.admin].tokens[account.dueToken].tax :
             account.tokens[account.dueToken].tax;
 
         account.dueTab = accrueInterest(
@@ -334,7 +333,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         uint256 callTime,       // time allowed after a call
         address user,           // address of the payer TODO: can't be msg.sender?
         address dueToken,       // address of the token to pay out in
-        bool    useExecParams   // if true, use exec asset params. else, set below
+        bool    useAdminParams  // if true, use exec asset params. else, set below
     ) 
         private returns (bool) 
     {
@@ -347,9 +346,9 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         
         // Payout token can't be 0 unless mama params being used. 
         // NOTE: No checks on whether dueToke has any tradeToken matches
-        if (useExecParams) {
+        if (useAdminParams) {
             require(
-                execParams[msg.sender].dueToken != address(0), 
+                adminParams[msg.sender].dueToken != address(0), 
                 "ccm-chief-open-mama-due-invalid"
             );
         } else {
@@ -369,12 +368,12 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         accountKeys[accountId] = accountKey;
         accountId = add(accountId, 1); 
         // Initialize the account
-        account.exec = msg.sender;
+        account.admin = msg.sender;
         account.dueTab = dueTab;
-        account.useExecParams = useExecParams;
+        account.useAdminParams = useAdminParams;
         account.callTime = callTime;
         account.lastAccrual = now;
-        if (!useExecParams) {account.dueToken = dueToken;}
+        if (!useAdminParams) {account.dueToken = dueToken;}
 
         require(vault.take(dueToken, user, dueTab), "ccm-chief-open-take-failed");
         // TODO
@@ -391,7 +390,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         uint256 biteFee,   // liquidation penalty, as a ray
         address token,   // address of the token to add
         address user,   // address of the holder / payer
-        bool    useExecParams    // set this to contract-wide params?
+        bool    useAdminParams    // set this to contract-wide params?
     ) 
         private returns (bool) 
     {
@@ -415,16 +414,16 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         address dueToken;
         AssetClass memory asset;
         // mama or account?
-        if (useExecParams) { 
-            dueToken = execParams[msg.sender].dueToken;
-            asset = execParams[msg.sender].tokens[token]; 
+        if (useAdminParams) { 
+            dueToken = adminParams[msg.sender].dueToken;
+            asset = adminParams[msg.sender].tokens[token]; 
         } else {
              // Check that account exists 
             key = getHash(msg.sender, user);
             require(accounts[key].lastAccrual > 0, "ccm-chief-ngem-acct-nonexistant");
             // Check that account is not using the mom params (waste of gas and
             // deceptive to the contract to set params that aren't used)
-            require(!accounts[key].useExecParams, "ccm-chief-ngem-acct-uses-mom");
+            require(!accounts[key].useAdminParams, "ccm-chief-ngem-acct-uses-mom");
             dueToken = accounts[key].dueToken;
             asset = accounts[key].tokens[token];
         }
@@ -444,7 +443,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         asset.biteFee = biteFee;
 
 
-        if(useExecParams) {execParams[msg.sender].tokens[token] = asset;}
+        if(useAdminParams) {adminParams[msg.sender].tokens[token] = asset;}
         else {accounts[key].tokens[token] = asset;}
 
         return true; 
@@ -460,8 +459,8 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     // approval events from popular ERC20s waiting for approvals to this contract,
     // then call open() from a malicious contract and effectively steal all
     // approved funds 
-    function setAllowance(address exec, address user, uint allowance) external returns (bool) {
-        bytes32 accountKey = getHash(exec, user);
+    function setAllowance(address admin, address user, uint allowance) external returns (bool) {
+        bytes32 accountKey = getHash(admin, user);
         require(
             msg.sender == user ||
             accounts[accountKey].pals[msg.sender],
@@ -474,6 +473,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     // TODO: add user param to allow pals to call
     // TODO: takeAddress is unsafe because anyone can add a take address
     // that has an unlimited approval for this contract
+    // TODO: allowance
     function lock(
         bytes32 accountKey,
         address token, 
@@ -495,10 +495,10 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         address dueToken;
         bool use;
 
-        if (account.useExecParams) {                // use exec params
-            address exec = account.exec;
-            dueToken = execParams[exec].dueToken;
-            use = execParams[exec].tokens[token].use;
+        if (account.useAdminParams) {                // use exec params
+            address admin = account.admin;
+            dueToken = adminParams[admin].dueToken;
+            use = adminParams[admin].tokens[token].use;
         } else {                                    // use acct params
             dueToken = account.dueToken;
             use = account.tokens[token].use;
@@ -537,13 +537,13 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     }
 
     // Set the contract-wide due token
-    function setExecDueToken(address dueToken) external returns (bool) {
+    function setAdminDueToken(address dueToken) external returns (bool) {
         // dueToken can't be zero
         require(dueToken != address(0), "ccm-chief-mdue-token-invalid");
         // can't change due token
-        require(execParams[msg.sender].dueToken == address(0), "ccm-chief-mdue-already-set");
+        require(adminParams[msg.sender].dueToken == address(0), "ccm-chief-mdue-already-set");
         // set due
-        execParams[msg.sender].dueToken = dueToken;
+        adminParams[msg.sender].dueToken = dueToken;
     } 
 
     // Claim your payout
@@ -552,7 +552,7 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     }
 
     // add an asset to exec params
-    function addExecAsset(
+    function addAdminAsset(
         uint256 tax,        // interest rate charged on swapped collateral  
         uint256 biteLimit,  // minimum collateralization ratio, as a ray
         uint256 biteFee,    // liquidation penalty, as a ray
@@ -578,9 +578,9 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         uint256 callTime,
         address user,
         address dueToken,
-        bool useExecParams
+        bool useAdminParams
     ) external nonReentrant returns (bool) {
-        return _open(dueTab, callTime, user, dueToken, useExecParams);
+        return _open(dueTab, callTime, user, dueToken, useAdminParams);
     }
     // Open an account that will use exec params
     function open(
@@ -594,9 +594,9 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     }
 
     // can't do this for an acct bc they have already agreed to the terms
-    function toggleExecAsset(address token, bool use) external returns (bool) {
-        if (execParams[msg.sender].tokens[token].biteLimit > RAY) {return false;}
-        execParams[msg.sender].tokens[token].use = use;
+    function toggleAdminAsset(address token, bool use) external returns (bool) {
+        if (adminParams[msg.sender].tokens[token].biteLimit > RAY) {return false;}
+        adminParams[msg.sender].tokens[token].use = use;
         return true;
     }
 
@@ -630,12 +630,12 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
     // External Getters
     /////////////
     // stack to deep error if return everything at once
-    function accountUints(address exec, address user)
+    function accountUints(address admin, address user)
         external
         view
         returns (uint lastAccrual, uint dueTab, uint dueBalance, uint tradeBalance, uint callTime, uint callTab)
     {
-        Account memory account = accounts[getHash(exec, user)];
+        Account memory account = accounts[getHash(admin, user)];
         lastAccrual = account.lastAccrual;
         dueTab = account.dueTab;
         dueBalance = account.dueBalance;
@@ -644,45 +644,45 @@ contract Chief is Ownable, DSMath, DSNote, ReentrancyGuard {
         callTab = account.callTab;
     }
 
-    function accountState(address _exec, address _user) external view returns (State) {
-        return accounts[getHash(_exec, _user)].state;
+    function accountState(address _admin, address _user) external view returns (State) {
+        return accounts[getHash(_admin, _user)].state;
     }
 
-    function accountAddresses(address _exec, address _user)
+    function accountAddresses(address _admin, address _user)
         external
         view
-        returns (address exec, address dueToken, address tradeToken)
+        returns (address admin, address dueToken, address tradeToken)
     {
-        Account memory account = accounts[getHash(_exec, _user)];
-        exec = account.exec;
+        Account memory account = accounts[getHash(_admin, _user)];
+        admin = account.admin;
         dueToken = account.dueToken;
         tradeToken = account.tradeToken;
     }
 
-    function accountBools(address _exec, address _user) 
+    function accountBools(address _admin, address _user) 
         external
         view 
-        returns (bool useExecParams)
+        returns (bool useAdminParams)
     {
-        Account memory account = accounts[getHash(_exec, _user)];
-        useExecParams = account.useExecParams;
+        Account memory account = accounts[getHash(_admin, _user)];
+        useAdminParams = account.useAdminParams;
         // useAuction = account.useAuction;
     } 
 
-    function accountAsset(address _exec, address _user, address _token) 
+    function accountAsset(address _admin, address _user, address _token) 
         external
         view
         returns(bool use, uint tax, uint biteLimit, uint biteFee) 
     {
-        AssetClass memory asset = accounts[getHash(_exec, _user)].tokens[_token];
+        AssetClass memory asset = accounts[getHash(_admin, _user)].tokens[_token];
         use = asset.use;
         tax = asset.tax;
         biteLimit = asset.biteLimit;
         biteFee = asset.biteFee;
     }
 
-    function pals(address _exec, address _user, address _pal) external view returns (bool) {
-        return accounts[getHash(_exec, _user)].pals[_pal];
+    function pals(address _admin, address _user, address _pal) external view returns (bool) {
+        return accounts[getHash(_admin, _user)].pals[_pal];
     }
 
     // Go from wad (10**18) to ray (10**27)

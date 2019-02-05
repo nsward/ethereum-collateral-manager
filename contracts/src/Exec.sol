@@ -1,7 +1,7 @@
 pragma solidity ^0.5.3;
 pragma experimental ABIEncoderV2;
 
-import "openzeppelin-solidity/contracts/math/SafeMath.sol";
+// import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "./interfaces/VaultLike.sol";
 import "../lib/MathTools.sol";
 import "../lib/AuthTools.sol";
@@ -63,7 +63,7 @@ contract Exec is Ownable {
     }
 
     // Assume use Exec Params
-    function open(
+    function openWithAdminParams(
         uint owedTab,
         uint callTime,
         address user
@@ -107,6 +107,7 @@ contract Exec is Ownable {
         // initialize the account
         VatLike.Account memory acct;
         acct.admin = msg.sender;
+        acct.user = user;
         acct.owedTab = owedTab;
         acct.owedBal = owedTab;
         acct.callTime = callTime;
@@ -122,7 +123,7 @@ contract Exec is Ownable {
         return true;       
     }
 
-    function setAdminOwedToken(address owedToken) external returns (bool) {
+    function setAdminOwedGem(address owedToken) external returns (bool) {
         // can't be 0
         require(owedToken != address(0), "ccm-exec-setAdminOwedToken-owedToken-invalid");
         bytes32 paramsKey = MathTools.k256(msg.sender);
@@ -142,11 +143,11 @@ contract Exec is Ownable {
         bytes32 acctKey = MathTools.k256(msg.sender, user);
 
         (address owedGem, bytes32 paramsKey) = vat.owedGemByAccount(acctKey);
-        require(paramsKey != bytes32(0));
+        require(paramsKey != bytes32(0), "ccm-exec-addAsset-invalid-acct-params");
         
         // must be approved token pair
         bytes32 pairKey = MathTools.k256(owedGem, gem);
-        require(validTokenPairs[pairKey] == 1);
+        require(validTokenPairs[pairKey] == 1, "ccm-exec-addAsset-invalid-token-pair");
 
         VatLike.Asset memory asset;
         asset.use = 1;

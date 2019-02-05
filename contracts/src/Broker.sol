@@ -1,6 +1,6 @@
 pragma solidity ^0.5.3;
 
-import "openzeppelin-solidity/contracts/math/SafeMath.sol";
+// import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "./interfaces/VaultLike.sol";
 import "./interfaces/WrapperLike.sol";
 import "../lib/MathTools.sol";
@@ -46,9 +46,10 @@ contract Broker is AuthAndOwnable {
     // approval events from popular ERC20s waiting for approvals to this contract,
     // then call open() from a malicious contract and effectively steal all
     // approved funds
-    function setAllowance(bytes32 acctKey, address gem, uint allowance) external {
+    function setAllowance(address admin, address gem, uint allowance) external {
         // vat.safeSetAllowance(acctKey, msg.sender, gem, allowance);
-        require(vat.isUserOrAgent(acctKey, msg.sender), "ccm-broker-setAllowance-unauthorized");
+        // require(vat.isUserOrAgent(acctKey, msg.sender), "ccm-broker-setAllowance-unauthorized");
+        bytes32 acctKey = MathTools.k256(admin, msg.sender);
         vat.set("allowance", acctKey, gem, allowance);
     }
 

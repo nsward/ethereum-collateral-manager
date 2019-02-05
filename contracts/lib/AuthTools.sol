@@ -8,7 +8,7 @@ pragma solidity ^0.5.0;
 // Auth refers to other smart contracts in the system
 
 // OpenZeppelin Ownable Contract, with small change of event OwnershipTransferred
-// to TransferOwnership
+// to TransferOwnership and added revert strings
 /**
  * @title Ownable
  * @dev The Ownable contract has an owner address, and provides basic authorization control
@@ -39,7 +39,7 @@ contract Ownable {
      * @dev Throws if called by any account other than the owner.
      */
     modifier onlyOwner() {
-        require(isOwner());
+        require(isOwner(), "ccm-ownable-onlyOwner");
         _;
     }
 
@@ -74,7 +74,7 @@ contract Ownable {
      * @param newOwner The address to transfer ownership to.
      */
     function _transferOwnership(address newOwner) internal {
-        require(newOwner != address(0));
+        require(newOwner != address(0), "ccm-ownable-invalid-transfer-address");
         emit TransferOwnership(_owner, newOwner);
         _owner = newOwner;
     }

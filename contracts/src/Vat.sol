@@ -1,7 +1,7 @@
 pragma solidity ^0.5.3;
 pragma experimental ABIEncoderV2;
 
-import "openzeppelin-solidity/contracts/math/SafeMath.sol";
+// import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "../lib/MathTools.sol";
 import "../lib/AuthTools.sol";
 
@@ -296,7 +296,7 @@ contract Vat is AuthAndOwnable {
     }
 
     function doOpen(bytes32 acctKey, Account memory acct) public auth returns (address) {   // TODO: calldata?
-        require(accounts[acctKey].lastAccrual == 0, "ccm-vat-safeSetAccount-account-exists");
+        require(accounts[acctKey].lastAccrual == 0, "ccm-vat-doOpen-account-exists");
         address owedGem = owedGems[acct.paramsKey];
         allowances[acctKey][owedGem] = allowances[acctKey][owedGem].sub(acct.owedTab);
         accounts[acctKey] = acct;

@@ -1,12 +1,14 @@
+// System contracts
 const VatContract = artifacts.require("../contracts/Vat");
 const BrokerContract = artifacts.require("../contracts/Broker");
 const ExecContract = artifacts.require("../contracts/Exec");
 const VaultContract = artifacts.require("../contracts/Vault");
 const ProxyContract = artifacts.require("../contracts/Proxy");
 const SpotterContract = artifacts.require("../contracts/Spotter");
-const BiterContract = artifacts.require("../contracts/Biter.sol");
+const LiquidatorContract = artifacts.require("../contracts/Liquidator.sol");
 const ZrxWrapperContract = artifacts.require("../contracts/ZrxExchangeWrapper");
 
+// External contracts
 const OracleContract = artifacts.require("../contracts/Oracle");
 const TokenContract = artifacts.require("../contracts/ERC20Mintable");
 const { 
@@ -14,6 +16,7 @@ const {
   ZrxProxyContract 
 } = require("./contracts/zrxV2");
 
+// Utils
 const { assetDataUtils } = require("@0xproject/order-utils");
 const { bn, k256, ethToWei, weiToEth, hex } = require("./helpers/helpers");
 const BigNum = require('bignumber.js'); // useful bignumber library
@@ -34,10 +37,10 @@ contract("CCM System", function(accounts) {
   const admin = accounts[1];    // simulates the admin contract
   const user = accounts[2];     // owner of the collateral position
   const peer = accounts[3];     // recipient of payments
-  const anyone = accounts[4];   // anyone. represents an outside bad actor / curious guy
+  const keeper = accounts[4];    // keeper / liquidator / biter
   const minter = accounts[5];   // can mint tokens so we have some to play with
-  // const testowner = accounts[4]; // owner of the testc.
-  const ZERO_ADDR = '0x0000000000000000000000000000000000000000'
+  const anyone = accounts[6];   // anyone. represents an outside bad actor / curious guy
+  const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 
   // Value contract constructor defaults
   const price0 = new BN(ethToWei(100)); // 100 gem / 1 due token
@@ -48,7 +51,7 @@ contract("CCM System", function(accounts) {
   let broker;
   let exec;
   let vault;
-  let biter;
+  let liquidator;
   let proxy;
   let spotter;
   let wrapper;
@@ -82,7 +85,7 @@ contract("CCM System", function(accounts) {
     vault = await VaultContract.new(proxy.address, {from:owner});
     exec = await ExecContract.new(vat.address, vault.address, {from:owner});
     broker = await BrokerContract.new(vat.address, vault.address, {from:owner});
-    biter = await BiterContract.new(vat.address, broker.address, {from:owner});
+    liquidator = await LiquidatorContract.new(vat.address, broker.address, {from:owner});
 
     // Tokens
     owedGem = await TokenContract.new({from:minter});
@@ -122,7 +125,7 @@ contract("CCM System", function(accounts) {
     // Authorize contracts to interact with each other
     vat.addAuth(exec.address, {from:owner});
     vat.addAuth(broker.address, {from:owner});
-    vat.addAuth(biter.address, {from:owner});
+    vat.addAuth(liquidator.address, {from:owner});
     vault.addAuth(exec.address, {from:owner});
     vault.addAuth(broker.address, {from:owner});
     broker.addAuth(spotter.address, {from:owner});
@@ -145,7 +148,7 @@ contract("CCM System", function(accounts) {
     expect(await vat.owner()).to.equal(owner, "Vat owner incorrect");
     expect(await vat.auths(owner)).to.eq.BN(0, "Vat owner should not be auth");
     expect(await vat.auths(broker.address)).to.eq.BN(1, "Vat broker not auth");
-    expect(await vat.auths(biter.address)).to.eq.BN(1, "Vat biter not auth");
+    expect(await vat.auths(liquidator.address)).to.eq.BN(1, "Vat liquidator not auth");
     expect(await vat.auths(exec.address)).to.eq.BN(1, "Vat exec not address");
 
     // Broker
@@ -161,10 +164,10 @@ contract("CCM System", function(accounts) {
     expect(await exec.vat()).to.equal(vat.address, "Exec vat address incorrect");
     expect(await exec.validTokenPairs(pairKey)).to.eq.BN(1, "Exec token pair not added");
 
-    // Biter
-    expect(await biter.owner()).to.equal(owner, "Biter owner incorrect");
-    expect(await biter.vat()).to.equal(vat.address, "Biter vat address incorrect");
-    expect(await biter.broker()).to.equal(broker.address, "Biter broker address incorrect");
+    // Liquidator
+    expect(await liquidator.owner()).to.equal(owner, "Liquidator owner incorrect");
+    expect(await liquidator.vat()).to.equal(vat.address, "Liquidator vat address incorrect");
+    expect(await liquidator.broker()).to.equal(broker.address, "Liquidator broker address incorrect");
 
     // Vault
     expect(await vault.owner()).to.equal(owner, "Vault owner incorrect");
@@ -203,7 +206,7 @@ contract("CCM System", function(accounts) {
   });
 
   it("Check stuff", async() => {
-
+    
   });
 
 

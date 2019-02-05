@@ -10,7 +10,7 @@ contract VatLike {
 
 }
 
-contract Biter is Ownable {
+contract Liquidator is Ownable {
     
     VatLike public vat;
     BrokerLike public broker;

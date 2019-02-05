@@ -7,25 +7,26 @@
 
 pragma solidity ^0.5.3;
 
-import "../../lib/DSMath.sol";
-import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
+import "../../lib/AuthTools.sol";
 
-contract ChiefLike {
-    function file(bytes32, bytes32, uint) external;
+// TODO: update for new contract architecture
+contract BrokerLike {
+    function spot(bytes32, uint) external;
 }
 
 contract OracleLike {
     function peek() public returns (bytes32, bool);
 }
 
-contract Spotter is Ownable, DSMath {
-    ChiefLike public chief;
+// TODO: just need owner?
+contract Spotter is Ownable {
+    BrokerLike public broker;
     OracleLike public oracle;
     bytes32   public pair;
 
     // --- Init ---
-    constructor(address _chief, address _oracle, bytes32 _pair) public {
-        chief = ChiefLike(_chief);
+    constructor(address _broker, address _oracle, bytes32 _pair) public {
+        broker = BrokerLike(_broker);
         oracle = OracleLike(_oracle);
         pair = _pair;
     }
@@ -33,7 +34,8 @@ contract Spotter is Ownable, DSMath {
     // --- Update spot price for token pair in chief contract ---
     function poke() public {
         (bytes32 val, bool ok) = oracle.peek();
-        if (ok) { chief.file(pair, "spotPrice", price(uint(val))); }
+        // if (ok) { chief.file(pair, "spotPrice", price(uint(val))); }
+        if (ok) { broker.spot(pair, price(uint(val))); }
     }
 
     // This 'price function' will be different for every spotter depending

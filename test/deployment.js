@@ -1,55 +1,27 @@
-// System contracts
-const VatContract = artifacts.require("../contracts/Vat");
-const BrokerContract = artifacts.require("../contracts/Broker");
-const ExecContract = artifacts.require("../contracts/Exec");
-const VaultContract = artifacts.require("../contracts/Vault");
-const ProxyContract = artifacts.require("../contracts/Proxy");
-const SpotterContract = artifacts.require("../contracts/Spotter");
-const LiquidatorContract = artifacts.require("../contracts/Liquidator.sol");
-const ZrxWrapperContract = artifacts.require("../contracts/ZrxExchangeWrapper");
+// utils
+const { bn, ethToWei } = require('./helpers/testHelpers');
+const { deploySystem } = require("./helpers/deploy");
 
-// External contracts
-const OracleContract = artifacts.require("../contracts/Oracle");
-const TokenContract = artifacts.require("../contracts/ERC20Mintable");
-const { 
-  ZrxExchangeContract, 
-  ZrxProxyContract 
-} = require("./contracts/zrxV2");
-
-// Utils
-const { assetDataUtils } = require('@0xproject/order-utils');
-const { createSignedZrxOrder } = require('./helpers/zrxHelpers');
-const { bn, k256, ethToWei, weiToEth, hex } = require('./mathHelpers/helpers');
+// modules
 const BigNum = require('bignumber.js'); // useful bignumber library
-const BN = require('bn.js');  // bad bignumber library that web3.utils returns
 const chai = require('chai');
 const bnChai = require('bn-chai');
 const { expect } = chai;
 chai.use(bnChai(web3.utils.BN));
 
-//TODO: https://github.com/JoinColony/colonyNetwork/blob/develop/test/colony.js
 
-contract("CCM System", function(accounts) {
+contract("CCM System deployment", function(accounts) {
   
   BigNum.config({ DECIMAL_PLACES: 27, POW_PRECISION: 100})
 
   // Test addresses
   const owner = accounts[0];    // owner of the system contracts
-  const admin = accounts[1];    // simulates the admin contract
-  const user = accounts[2];     // owner of the collateral position
-  const peer = accounts[3];     // recipient of payments
-  const keeper = accounts[4];    // keeper / liquidator / biter
-  const minter = accounts[5];   // can mint tokens so we have some to play with
-  const relayer = accounts[6];
-  const anyone = accounts[7];   // anyone. represents an outside bad actor / curious guy
-  const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
+  const user = accounts[1];     // owner of the collateral position
+  const minter = accounts[2];   // can mint tokens so we have some to play with
 
   // Value contract constructor defaults
-  const price0 = new BN(ethToWei(100)); // 100 gem / 1 due token
-  const has = true;
-  const mintAmt = new BN(ethToWei(100000));
-  const salt = new BigNum(123);
-  const makerFee = new BigNum(0);
+  const price0 = new BigNum(ethToWei(100)); // 100 gem / 1 due token
+  const mintAmt = new BigNum(ethToWei(100000));
   
   // system contracts
   let vat;
@@ -65,81 +37,32 @@ contract("CCM System", function(accounts) {
   let zrxExchange;
   let zrxProxy;
   let oracle;
-  let owedGem;  // owed token contract
-  let heldGem;  // held token contract
-  let zrxGem;   // ZRX token contract
-  let _owed;    // owed token contract address
-  let _held;    // held token contract address
-  let _zrx;     // ZRX token contract address
+  let owedGem;      // owed token contract
+  let heldGem;      // held token contract
+  let zrxGem;       // ZRX token contract
 
   // mapping keys
-  let pairKey;                      // keccak256(_owed, _held)
-  let acctKey = k256(admin, user);  // keccak256(admin, user)
-
-  const sendDefaults = {from:owner, gas: 6721975, gasPrice: 100000000000}
-  ZrxExchangeContract.setProvider(web3.currentProvider);
-  ZrxExchangeContract.class_defaults = sendDefaults;
-  ZrxProxyContract.setProvider(web3.currentProvider);
-  ZrxProxyContract.class_defaults = sendDefaults;
+  let pairKey;      // keccak256(_owedGem, _heldGem)
 
 
   beforeEach("Instantiate Contracts", async() => {
-    // Main contracts
-    vat = await VatContract.new({from:owner});
-    proxy = await ProxyContract.new({from:owner});
-    vault = await VaultContract.new(proxy.address, {from:owner});
-    exec = await ExecContract.new(vat.address, vault.address, {from:owner});
-    broker = await BrokerContract.new(vat.address, vault.address, {from:owner});
-    liquidator = await LiquidatorContract.new(vat.address, broker.address, {from:owner});
-
-    // Tokens
-    owedGem = await TokenContract.new({from:minter});
-    heldGem = await TokenContract.new({from:minter});
-    zrxGem = await TokenContract.new({from:minter});
-    await owedGem.mint(user, mintAmt, {from:minter});  // mint due tokens
-    await heldGem.mint(user, mintAmt, {from:minter});  // mint trade tokens
-    await zrxGem.mint(user,  mintAmt, {from:minter});   // mint zrx tokens
-    _owed = owedGem.address;
-    _held = heldGem.address;
-    _zrx = zrxGem.address;
-
-    // Zero Ex Exchange
-    const zrxAssetData = assetDataUtils.encodeERC20AssetData(_zrx);
-    zrxExchange = await ZrxExchangeContract.new(zrxAssetData, {from:owner});
-    zrxProxy = await ZrxProxyContract.new({from:owner});
-    // register exchange and proxy with each other
-    await zrxProxy.addAuthorizedAddress(zrxExchange.address);
-    await zrxExchange.registerAssetProxy(zrxProxy.address);
-
-    // Oracle. This will ultimately be MakerDAO medianizer contract
-    oracle = await OracleContract.new(price0, has, {from:owner});
-
-    // Zero Ex Exchange Wrapper
-    wrapper = await ZrxWrapperContract.new(
-      vault.address, 
-      zrxExchange.address, 
-      zrxProxy.address, 
-      _zrx, 
-      {from:owner}
-    );
-
-    // The spotter. Takes the medianizer value for pair and pushes it into the Chief
-    pairKey = k256(_owed, _held);
-    spotter = await SpotterContract.new(broker.address, oracle.address, pairKey, {from:owner});
-
-    // Authorize contracts to interact with each other
-    vat.addAuth(exec.address, {from:owner});
-    vat.addAuth(broker.address, {from:owner});
-    vat.addAuth(liquidator.address, {from:owner});
-    vault.addAuth(exec.address, {from:owner});
-    vault.addAuth(broker.address, {from:owner});
-    broker.addAuth(spotter.address, {from:owner});
-    broker.file(hex("wrapper"), wrapper.address, 1);
-    proxy.addAuth(vault.address, {from:owner});
-    wrapper.addAuth(broker.address, {from:owner});
-
-    // approve trading pair
-    exec.file(hex("validTokenPair"), pairKey, 1);
+    contracts = {
+      vat,
+      proxy,
+      vault,
+      exec,
+      broker,
+      liquidator,
+      owedGem,
+      heldGem,
+      zrxGem,
+      zrxExchange,
+      zrxProxy,
+      oracle,
+      wrapper,
+      spotter,
+      pairKey
+    } = await deploySystem(owner, user, minter, price0, mintAmt);
 
 //     // approve trading pair and set spotter address
 //     await chief.methods['file(bytes32,bytes32,bool)'](pairKey, hex("use"), true);
@@ -196,41 +119,23 @@ contract("CCM System", function(accounts) {
     expect(await wrapper.vault()).to.equal(vault.address, "Wrapper vault address incorrect");
     expect(await wrapper.exchange()).to.equal(zrxExchange.address, "Wrapper exchange address incorrect");
     expect(await wrapper.zrxProxy()).to.equal(zrxProxy.address, "Wrapper proxy address incorrect");
-    expect(await wrapper.zrx()).to.equal(_zrx, "Wrapper ZRX token address incorrect");
+    expect(await wrapper.zrx()).to.equal(zrxGem.address, "Wrapper ZRX token address incorrect");
     
     // Oracle
     const peek = await oracle.peek();
-    expect(bn(peek[0])).to.eq.BN(price0, "Oracle val incorrect");
-    expect(peek[1]).to.equal(has, "Oracle has incorrect");
+    expect(bn(peek[0])).to.eq.BN(bn(price0), "Oracle val incorrect");
+    expect(peek[1]).to.equal(true, "Oracle has incorrect");
     expect(await oracle.owner()).to.equal(owner, "Oracle owner address incorrect");
 
     // Tokens
-    expect(await owedGem.isMinter(minter), "Due minter incorrect.").to.be.true;
-    expect(await heldGem.isMinter(minter), "Gem minter incorrect.").to.be.true;
+    expect(await owedGem.isMinter(minter), "Owed gem minter incorrect.").to.be.true;
+    expect(await heldGem.isMinter(minter), "Held gem minter incorrect.").to.be.true;
+    expect(await zrxGem.isMinter(minter), "Zrx Gem minter incorrect.").to.be.true;
     
   });
 
-  it("Check order creation", async() => {
-    const owedAmt = new BigNum(100);
-    const heldAmt = new BigNum(100);
-    const takerFee = new BigNum(0);
-    const giveHeldForOwedOrder = await createSignedZrxOrder(
-      zrxExchange.address,
-      peer,
-      ZERO_ADDR,
-      _held,
-      _owed,
-      heldAmt,
-      owedAmt,
-      makerFee,
-      takerFee,
-      relayer,
-      ZERO_ADDR,
-      new BigNum(100000000000000),
-      salt
-    );
-    console.log(giveHeldForOwedOrder);
-  });
+
+
 
 
 //   it("Check Chief with no mama params", async() => {
@@ -328,49 +233,3 @@ contract("CCM System", function(accounts) {
 //   });
 
 });
-
-// // TODO: check order too
-// // NOTE: takes _who, _due, _gem, and user from global variables
-// // async function checkAcct(chief, acct      who, user, _due, _gem, era, tab, bal, own, zen, ohm, state, mom, opt) {
-// async function checkAcct(chief, acct) {
-//   const acctUints = await chief.accountUints(acct.exec, acct.user);
-//   const acctBools = await chief.accountBools(acct.exec, acct.user);
-//   const acctState = await chief.accountState(acct.exec, acct.user);
-//   const acctAddresses = await chief.accountAddresses(acct.exec, acct.user);
-
-//   expect(acctUints.lastAccrual).to.eq.BN(acct.lastAccrual, "Acct era wrong");
-//   expect(acctUints.dueTab).to.eq.BN(acct.dueTab, "Acct tab wrong");
-//   expect(acctUints.dueBalance).to.eq.BN(acct.dueBalance, "Acct bal wrong");
-//   expect(acctUints.tradeBalance).to.eq.BN(acct.tradeBalance, "Acct own wrong");
-//   expect(acctUints.callTime).to.eq.BN(acct.callTime, "Acct zen wrong");
-//   expect(acctUints.callTab).to.eq.BN(acct.callTab, "Acct ohm wrong");
-//   expect(acctState).to.eq.BN(acct.state, "Acct state wrong");
-//   expect(acctBools).to.equal(acct.useExecParams, "Acct mom wrong");
-//   expect(acctAddresses.exec).to.equal(acct.exec, "Acct who wrong");
-//   expect(acctAddresses.dueToken).to.equal(acct.dueToken, "Acct due wrong");
-//   expect(acctAddresses.tradeToken).to.equal(acct.tradeToken, "Acct gem wrong");
-// }
-
-// // becuase web3 utils uses bn.js instead of bignumber.js
-// function bn(num) {
-//   return web3.utils.toBN(num);
-// }
-
-// function k256(addr1, addr2) {
-//   return web3.utils.soliditySha3(
-//     {type: 'address', value: addr1},
-//     {type: 'address', value: addr2}
-//   );
-// }
-
-// function ethToWei(val) {
-//   return web3.utils.toWei(val.toString(), 'ether');
-// }
-
-// function weiToEth(val) {
-//   return web3.utils.fromWei(val.toString(), 'ether');
-// }
-
-// function hex(val) {
-//   return web3.utils.toHex(val);
-// }

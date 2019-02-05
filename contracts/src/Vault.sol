@@ -4,16 +4,21 @@ pragma solidity ^0.5.3;
 // import "../lib/DSMath.sol";
 // import "../lib/DSNote.sol";
 // import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
-import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "../lib/MathTools.sol";
-import "../lib/Auth.sol";
-import "openzeppelin-solidity/contracts/token/ERC20/IERC20.sol";
-import "./Interfaces/ProxyLike.sol";
+import "../lib/AuthTools.sol";
+import "./interfaces/ProxyLike.sol";
+import "./interfaces/GemLike.sol";
+import "openzeppelin-solidity/contracts/math/SafeMath.sol";
+
 
 // modeled after https://github.com/dydxprotocol/protocol/blob/master/contracts/margin/Vault.sol
 // use MathTools
 // AuthTools
-contract Vault is Ownable, DSMath {
+contract Vault is AuthAndOwnable {
+
+    constructor(address _proxy) public {
+        proxy = ProxyLike(_proxy);
+    }
 
     // address public PROXY;
     ProxyLike public proxy;
@@ -45,7 +50,7 @@ contract Vault is Ownable, DSMath {
         // require(claims[dst][_gem] >= amt, "ccm-vault-give-insufficient-balance");
         // claims[dst][_gem] = sub(claims[dst][_gem], amt);
         chest[_gem] = SafeMath.sub(chest[_gem], amt);
-        IERC20 gem = IERC20(_gem);
+        GemLike gem = GemLike(_gem);
         // NOTE: this is pull only
         require(gem.transfer(dst, amt), "ccm-vault-give-transfer-failed");
 
@@ -61,14 +66,14 @@ contract Vault is Ownable, DSMath {
 
     // Verify that nothing has gone crazy
     function verifyBalance(address _gem) private view {
-        // If this is false, we have big problems
-        assert(IERC20(_gem).balanceOf(address(this)) >= chest[_gem]);
+        // If this is false, something is wrong
+        assert(GemLike(_gem).balanceOf(address(this)) >= chest[_gem]);
     }
 
 
     function giveToWrapper(address _gem, address dst, uint amt) external auth returns (bool) {
         chest[_gem] = SafeMath.sub(chest[_gem], amt);
-        IERC20 gem = IERC20(_gem);
+        GemLike gem = GemLike(_gem);
         require(gem.transfer(dst, amt), "ccm-vault-giveToWrapper-transfer-failed");
         verifyBalance(_gem);
         return true;
@@ -76,7 +81,7 @@ contract Vault is Ownable, DSMath {
 
     function takeFromWrapper(address _gem, address src, uint amt) external auth returns (bool) {
         chest[_gem] = SafeMath.add(chest[_gem], amt);
-        IERC20 gem = IERC20(_gem);
+        GemLike gem = GemLike(_gem);
         require(gem.transferFrom(src, address(this), amt), "ccm-vault-takeFromWrapper-transfer-failed");
         verifyBalance(_gem);
         return true;

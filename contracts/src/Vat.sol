@@ -1,12 +1,15 @@
 pragma solidity ^0.5.3;
-// pragma experimental ABIEncoderV2;
+pragma experimental ABIEncoderV2;
 
-// import "openzeppelin-solidity/contracts/ownership/Ownable.sol";
 import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "../lib/MathTools.sol";
-import "../lib/Auth.sol";
+import "../lib/AuthTools.sol";
 
-contract Vat is Auth {
+contract Vat is AuthAndOwnable {
+
+    // constructor(address foo) AuthAndOwnable(foo) public {}
+
+    using SafeMath for uint;
 
     // Could just have a called bool? or even calltime == 0?
     enum State{ Par, Call, Bit, Old }
@@ -91,16 +94,25 @@ contract Vat is Auth {
             if (which == "makerGem")    got = bytes32(bytes20(safeOrders[key].makerGem));
             if (which == "takerGem")    got = bytes32(bytes20(safeOrders[key].takerGem));
         }
+        // if (what == "asset") {
+        //     if (which == "use")         got == bytes32(assets[key].use);
+        //     if (which == "tax")         got == bytes32(assets[key].tax);
+        //     if (which == "biteLimit")   got == bytes32(assets[key].biteLimit);
+        //     if (which == "biteFee")     got == bytes32(assets[key].biteFee);
+        //     // if (which == "biteGap")     got == bytes32(assets[key].biteGap);
+        // }
+    }
+    function get(bytes32 what, bytes32 which, bytes32 key, address addr) external view returns (bytes32 got) {
         if (what == "asset") {
-            if (which == "use")         got == bytes32(assets[key].use);
-            if (which == "tax")         got == bytes32(assets[key].tax);
-            if (which == "biteLimit")   got == bytes32(assets[key].biteLimit);
-            if (which == "biteFee")     got == bytes32(assets[key].biteFee);
+            if (which == "use") got = bytes32(assets[key][addr].use);
+            if (which == "tax")         got == bytes32(assets[key][addr].tax);
+            if (which == "biteLimit")   got == bytes32(assets[key][addr].biteLimit);
+            if (which == "biteFee")     got == bytes32(assets[key][addr].biteFee);
             // if (which == "biteGap")     got == bytes32(assets[key].biteGap);
         }
     }
 
-    function getOrderData(key) external view returns (bytes) {
+    function getOrderData(bytes32 key) external view returns (bytes memory) {
         return safeOrders[key].orderData;
     }
 
@@ -127,6 +139,30 @@ contract Vat is Auth {
         if (what == "noFill") noFills[key] = data;
     }
 
+    // tODO
+    function addTo(bytes32 what, bytes32 which, bytes32 key, uint amt) external auth {
+        if (what == "account") {
+            if (which == "owedBal") accounts[key].owedBal = accounts[key].owedBal.add(amt);
+            if (which == "heldBal") accounts[key].heldBal = accounts[key].heldBal.add(amt);
+            if (which == "owedTab") accounts[key].owedTab = accounts[key].owedTab.add(amt);
+        }
+    }
+    function subFrom(bytes32 what, bytes32 which, bytes32 key, uint amt) external auth {
+        if (what == "account") {
+            if (which == "owedBal") accounts[key].owedBal = accounts[key].owedBal.sub(amt);
+            if (which == "heldBal") accounts[key].heldBal = accounts[key].heldBal.sub(amt);
+            if (which == "owedTab") accounts[key].owedTab = accounts[key].owedTab.sub(amt);
+        }
+    }
+    function addTo(bytes32 what, bytes32 key, uint amt) external auth {
+        if (what == "claim") claims[key] = claims[key].add(amt);
+        // if (what == "allowance") allowances[key] = allowances[key].add(amt);
+    }
+    function subFrom(bytes32 what, bytes32 key, uint amt) external auth {
+        if (what == "claim") claims[key] = claims[key].sub(amt);
+        // if (what == "allowance") allowances[key] = allowances[key].sub(amt);
+    }
+
     function set(bytes32 what, bytes32 which, bytes32 key, uint data) external auth {
         if (what == "account") {
             if (which == "callTab") accounts[key].callTab = data;
@@ -138,7 +174,7 @@ contract Vat is Auth {
             if (which == "lastAccrual") accounts[key].lastAccrual = data;
             if (which == "callTime") accounts[key].callTime = data;
         }
-        if (what == "asset" && which == "use") assets[key].use = data;
+        // if (what == "asset" && which == "use") assets[key].use = data;
     }
     function set(bytes32 what, bytes32 which, bytes32 key, bytes32 data) external auth {
         if (what == "account" && which == "paramsKey") accounts[key].paramsKey = data;
@@ -155,14 +191,17 @@ contract Vat is Auth {
 
     /// Batch setters
 
-    function set(bytes32 what, bytes32 key, address gem, Asset calldata _asset) external auth {
+    function set(bytes32 what, bytes32 key, address gem, Asset memory _asset) public auth { // TODO: calldata?
         if (what == "asset") assets[key][gem] = _asset;
     }
-    function set(bytes32 what, bytes32 key, Account calldata _account) external auth {
+    function set(bytes32 what, bytes32 key, Account memory _account) public auth {  // TODO: calldata?
         if (what == "account") accounts[key] = _account;
     }
-    function set(bytes32 what, bytes32 key, Order calldata _order) external auth {
+    function set(bytes32 what, bytes32 key, Order memory _order) public auth {  // TODO: calldata?
         if (what == "safeOrder") safeOrders[key] = _order; 
+    }
+    function set(bytes32 what, bytes32 which, bytes32 key, address addr, uint data) external auth {
+        if (what == "asset" && which == "use") assets[key][addr].use = data;
     }
 
     // make this addToBals
@@ -181,28 +220,28 @@ contract Vat is Auth {
         acct.heldGem = heldGem;
         acct.heldBal = heldBal;
     }
-    function addOwedBal(bytes32 acctKey, uint amt) external auth {
-        accounts[acctKey].owedBal = SafeMath.add(accounts[acctKey].owedBal, amt);
-    }
-    function addHeldBal(bytes32 acctKey, uint amt) external auth {
-        accounts[acctKey].heldBal = SafeMath.add(accounts[acctKey].heldBal, amt);
-    }
-    function subOwedBal(bytes32 acctKey, uint amt) external auth {
-        accounts[acctKey].owedBal = SafeMath.sub(accounts[acctKey].owedBal, amt);
-    }
-    function subHeldBal(bytes32 acctKey, uint amt) external auth {
-        accounts[acctKey].heldBal = SafeMath.sub(accounts[acctKey].heldBal, amt);
-    }
+    // function addOwedBal(bytes32 acctKey, uint amt) external auth {
+    //     accounts[acctKey].owedBal = SafeMath.add(accounts[acctKey].owedBal, amt);
+    // }
+    // function addHeldBal(bytes32 acctKey, uint amt) external auth {
+    //     accounts[acctKey].heldBal = SafeMath.add(accounts[acctKey].heldBal, amt);
+    // }
+    // function subOwedBal(bytes32 acctKey, uint amt) external auth {
+    //     accounts[acctKey].owedBal = SafeMath.sub(accounts[acctKey].owedBal, amt);
+    // }
+    // function subHeldBal(bytes32 acctKey, uint amt) external auth {
+    //     accounts[acctKey].heldBal = SafeMath.sub(accounts[acctKey].heldBal, amt);
+    // }
 
 
     // do not include wrapper or fillAmt in hash, as these could be used 
     // to make the same order return a different hash but still be fillable
-    function setSafeOrderAndNoFill(bytes32 key, Order calldata _order) external auth {
+    function setSafeOrderAndNoFill(bytes32 key, Order memory _order) public auth {  // TODO: calldata?
         safeOrders[key] = _order;
         noFills[
             keccak256(abi.encodePacked(
-                _order.makerAsset, 
-                _order.takerAsset, 
+                _order.makerGem, 
+                _order.takerGem, 
                 _order.makerAmt, 
                 _order.takerAmt, 
                 _order.orderData
@@ -236,8 +275,8 @@ contract Vat is Auth {
     }
 
     function safeSetOwedGem(bytes32 paramsKey, address owedToken) external auth {
-        require(owedTokens[paramsKey] == address(0), "ccm-vat-safeSetOwedToken-owedToken-exists");
-        owedTokens[paramsKey] = owedToken;
+        require(owedGems[paramsKey] == address(0), "ccm-vat-safeSetOwedToken-owedToken-exists");
+        owedGems[paramsKey] = owedToken;
     }
 
     function owedGemByAccount(bytes32 acctKey) external view returns (address owedGem, bytes32 paramsKey) {
@@ -251,27 +290,27 @@ contract Vat is Auth {
         owedGem = owedGems[paramsKey];
     }
 
-    function safeSetAsset(bytes32 paramsKey, Asset calldata _asset) {
-        require(assets[paramsKey].biteLimit == 0, "ccm-vat-safeSetAsset-asset-exists");
-        assets[paramsKey] = _asset;
+    function safeSetAsset(bytes32 paramsKey, address gem, Asset memory _asset) public auth {         // TODO: calldata?
+        require(assets[paramsKey][gem].biteLimit == 0, "ccm-vat-safeSetAsset-asset-exists");
+        assets[paramsKey][gem] = _asset;
     }
 
-    function doOpen(bytes32 acctKey, Account calldata acct) external auth returns (address) {
+    function doOpen(bytes32 acctKey, Account memory acct) public auth returns (address) {   // TODO: calldata?
         require(accounts[acctKey].lastAccrual == 0, "ccm-vat-safeSetAccount-account-exists");
         address owedGem = owedGems[acct.paramsKey];
-        allowances[key][owedGem] = SafeMath.sub(allowances[key][owedGem], acct.owedTab);
+        allowances[acctKey][owedGem] = allowances[acctKey][owedGem].sub(acct.owedTab);
         accounts[acctKey] = acct;
 
         return owedGem;
     }
 
-    function addClaim(bytes32 claimKey, uint amt) external auth {
-        claims[claimKey] = SafeMath.add(claims[claimKey], amt);
-    }
+    // function addClaim(bytes32 claimKey, uint amt) external auth {
+    //     claims[claimKey] = SafeMath.add(claims[claimKey], amt);
+    // }
 
-    function subClaim(bytes32 claimKey, uint amt) external auth {
-        claims[claimKey] = SafeMath.sub(claims[claimKey], amt);
-    }
+    // function subClaim(bytes32 claimKey, uint amt) external auth {
+    //     claims[claimKey] = SafeMath.sub(claims[claimKey], amt);
+    // }
 
     function updateTab(bytes32 key) external auth returns (uint) {
         Account storage acct = accounts[key];
@@ -288,9 +327,9 @@ contract Vat is Auth {
         uint tax = assets[acct.paramsKey][acct.heldGem].tax;
 
         acct.owedTab = MathTools.accrueInterest(
-            SafeMath.sub(acct.owedTab, acct.owedBal),
+            acct.owedTab.sub(acct.owedBal),
             tax,
-            SafeMath.sub(now, acct.lastAccrual)
+            now.sub(acct.lastAccrual)
         );
 
         return acct.owedTab;

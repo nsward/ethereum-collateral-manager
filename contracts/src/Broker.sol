@@ -121,6 +121,7 @@ contract Broker is AuthAndOwnable {
     }
 
     // TODO nonReentrant
+    // TODO: provide an option to add order to noFills
     function swap(
         bytes32 acctKey,
         address wrapper,

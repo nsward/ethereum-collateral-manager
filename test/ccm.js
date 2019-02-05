@@ -17,8 +17,9 @@ const {
 } = require("./contracts/zrxV2");
 
 // Utils
-const { assetDataUtils } = require("@0xproject/order-utils");
-const { bn, k256, ethToWei, weiToEth, hex } = require("./helpers/helpers");
+const { assetDataUtils } = require('@0xproject/order-utils');
+const { createSignedZrxOrder } = require('./helpers/zrxHelpers');
+const { bn, k256, ethToWei, weiToEth, hex } = require('./mathHelpers/helpers');
 const BigNum = require('bignumber.js'); // useful bignumber library
 const BN = require('bn.js');  // bad bignumber library that web3.utils returns
 const chai = require('chai');
@@ -39,12 +40,16 @@ contract("CCM System", function(accounts) {
   const peer = accounts[3];     // recipient of payments
   const keeper = accounts[4];    // keeper / liquidator / biter
   const minter = accounts[5];   // can mint tokens so we have some to play with
-  const anyone = accounts[6];   // anyone. represents an outside bad actor / curious guy
+  const relayer = accounts[6];
+  const anyone = accounts[7];   // anyone. represents an outside bad actor / curious guy
   const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 
   // Value contract constructor defaults
   const price0 = new BN(ethToWei(100)); // 100 gem / 1 due token
   const has = true;
+  const mintAmt = new BN(ethToWei(100000));
+  const salt = new BigNum(123);
+  const makerFee = new BigNum(0);
   
   // system contracts
   let vat;
@@ -91,9 +96,9 @@ contract("CCM System", function(accounts) {
     owedGem = await TokenContract.new({from:minter});
     heldGem = await TokenContract.new({from:minter});
     zrxGem = await TokenContract.new({from:minter});
-    await owedGem.mint(user, new BN(ethToWei(100000)), {from:minter});  // mint due tokens
-    await heldGem.mint(user, new BN(ethToWei(100000)), {from:minter});  // mint trade tokens
-    await zrxGem.mint(user, new BN(ethToWei(100000)), {from:minter});   // mint zrx tokens
+    await owedGem.mint(user, mintAmt, {from:minter});  // mint due tokens
+    await heldGem.mint(user, mintAmt, {from:minter});  // mint trade tokens
+    await zrxGem.mint(user,  mintAmt, {from:minter});   // mint zrx tokens
     _owed = owedGem.address;
     _held = heldGem.address;
     _zrx = zrxGem.address;
@@ -205,8 +210,26 @@ contract("CCM System", function(accounts) {
     
   });
 
-  it("Check stuff", async() => {
-    
+  it("Check order creation", async() => {
+    const owedAmt = new BigNum(100);
+    const heldAmt = new BigNum(100);
+    const takerFee = new BigNum(0);
+    const giveHeldForOwedOrder = await createSignedZrxOrder(
+      zrxExchange.address,
+      peer,
+      ZERO_ADDR,
+      _held,
+      _owed,
+      heldAmt,
+      owedAmt,
+      makerFee,
+      takerFee,
+      relayer,
+      ZERO_ADDR,
+      new BigNum(100000000000000),
+      salt
+    );
+    console.log(giveHeldForOwedOrder);
   });
 
 

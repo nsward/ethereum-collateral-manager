@@ -1,3 +1,5 @@
+// From dYdX Protocol https://github.com/dydxprotocol/protocol
+
 const TruffleContract = require("truffle-contract");
 
 let ExchangeV2JSON = require("@0xproject/migrations/artifacts/2.0.0-testnet/Exchange.json");

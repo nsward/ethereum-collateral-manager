@@ -14,20 +14,15 @@
   limitations under the License.
 */
 
-pragma solidity ^0.5.2;
+pragma solidity ^0.5.0;
 
-contract LibOrder {
+library ZrxLib {
 
-    // A valid order remains fillable until it is expired, fully filled, or cancelled.
-    // An order's state is unaffected by external factors, like account balances.
-    enum OrderStatus {
-        INVALID,                     // Default value
-        INVALID_MAKER_ASSET_AMOUNT,  // Order does not have a valid maker asset amount
-        INVALID_TAKER_ASSET_AMOUNT,  // Order does not have a valid taker asset amount
-        FILLABLE,                    // Order is fillable
-        EXPIRED,                     // Order has already expired
-        FULLY_FILLED,                // Order is fully filled
-        CANCELLED                    // Order has been cancelled
+    struct FillResults {
+        uint256 makerAssetFilledAmount;  // Total amount of makerAsset(s) filled.
+        uint256 takerAssetFilledAmount;  // Total amount of takerAsset(s) filled.
+        uint256 makerFeePaid;            // Total amount of ZRX paid by maker(s) to feeRecipient(s).
+        uint256 takerFeePaid;            // Total amount of ZRX paid by taker to feeRecipients(s).
     }
 
     // solhint-disable max-line-length
@@ -47,9 +42,21 @@ contract LibOrder {
     }
     // solhint-enable max-line-length
 
-    struct OrderInfo {
-        uint8 orderStatus;                    // Status that describes order's validity and fillability.
-        bytes32 orderHash;                    // EIP712 hash of the order (see LibOrder.getOrderHash).
-        uint256 orderTakerAssetFilledAmount;  // Amount of order that has already been filled.
-    }
+    // A valid order remains fillable until it is expired, fully filled, or cancelled.
+    // An order's state is unaffected by external factors, like account balances.
+    // enum OrderStatus {
+    //     INVALID,                     // Default value
+    //     INVALID_MAKER_ASSET_AMOUNT,  // Order does not have a valid maker asset amount
+    //     INVALID_TAKER_ASSET_AMOUNT,  // Order does not have a valid taker asset amount
+    //     FILLABLE,                    // Order is fillable
+    //     EXPIRED,                     // Order has already expired
+    //     FULLY_FILLED,                // Order is fully filled
+    //     CANCELLED                    // Order has been cancelled
+    // }
+
+    // struct OrderInfo {
+    //     uint8 orderStatus;                    // Status that describes order's validity and fillability.
+    //     bytes32 orderHash;                    // EIP712 hash of the order (see LibOrder.getOrderHash).
+    //     uint256 orderTakerAssetFilledAmount;  // Amount of order that has already been filled.
+    // }
 }

@@ -73,4 +73,8 @@ library MathTools {
     function k256(address _a, address _b) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(_a, _b));
     }
+
+    function k256(address _a) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(_a));
+    }
 }

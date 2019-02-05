@@ -44,3 +44,29 @@
 //   });
 //   return p;
 // }
+
+// becuase web3 utils uses bn.js instead of bignumber.js
+function bn(num) {
+return web3.utils.toBN(num);
+}
+
+function k256(addr1, addr2) {
+return web3.utils.soliditySha3(
+    {type: 'address', value: addr1},
+    {type: 'address', value: addr2}
+);
+}
+
+function ethToWei(val) {
+return web3.utils.toWei(val.toString(), 'ether');
+}
+
+function weiToEth(val) {
+return web3.utils.fromWei(val.toString(), 'ether');
+}
+
+function hex(val) {
+return web3.utils.toHex(val);
+}
+
+module.exports = { bn, k256, ethToWei, weiToEth, hex }

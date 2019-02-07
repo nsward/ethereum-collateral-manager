@@ -91,31 +91,6 @@ contract AuthAndOwnable is Ownable {
         address indexed removed,
         address indexed remover
     );
-    // event ChangeOwner(
-    //     address newOwner,
-    //     address oldOwner
-    // );
-    // address public owner;
-    // modifier onlyOwner {
-    //     require(msg.sender == owner, "ccm-onlyOwner");
-    //     _;
-    // }
-    // function changeOwner(address guy) public onlyOwner {
-    //     owner = guy;
-    //     emit ChangeOwner(guy, msg.sender);
-    // }
-    // --- Init ---
-    // constructor(address[] memory authAddresses) internal {
-    //     for (uint i = 0; i < authAddresses.length; i++) {
-    //         address guy = authAddresses[i];
-    //         auths[guy] = 1;
-    //         emit AddAuth(guy, msg.sender);
-    //     }
-    // }
-    // constructor(address foo) internal {
-    //     auths[foo] = 1;
-    //     emit AddAuth(foo, address(0));
-    // }
 
     mapping (address => uint) public auths;
     modifier auth { require(auths[msg.sender] == 1, "ccm-auth"); _; }

@@ -9,7 +9,6 @@ pragma solidity ^0.5.3;
 
 import "../../lib/AuthTools.sol";
 
-// TODO: update for new contract architecture
 contract BrokerLike {
     function spot(bytes32, uint) external;
 }
@@ -18,7 +17,6 @@ contract OracleLike {
     function peek() public returns (bytes32, bool);
 }
 
-// TODO: just need owner?
 contract Spotter is Ownable {
     BrokerLike public broker;
     OracleLike public oracle;
@@ -34,7 +32,6 @@ contract Spotter is Ownable {
     // --- Update spot price for token pair in chief contract ---
     function poke() public {
         (bytes32 val, bool ok) = oracle.peek();
-        // if (ok) { chief.file(pair, "spotPrice", price(uint(val))); }
         if (ok) { broker.spot(pair, price(uint(val))); }
     }
 

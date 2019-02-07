@@ -14,18 +14,13 @@ const TokenContract = artifacts.require("../contracts/ERC20Mintable");
 const { 
   ZrxExchangeContract, 
   ZrxProxyContract 
-} = require("../test/contracts/zrxV2");
+} = require("../contracts/zrxV2");
 
-// utils
-const BigNum = require("bignumber.js");
+// Utils
 const { assetDataUtils } = require('@0xproject/order-utils');
+const { bn, k256, hex } = require('./web3Helpers');
 
-module.exports = async function(deployer, network, accounts) {
-  const user = accounts[0];
-  const peer = accounts[1];
-  const owner = accounts[2];
-  const mintAmt = web3.utils.toWei('100', 'ether');
-  const price0 = web3.utils.toWei('100', 'ether');
+async function deploySystem(owner, user, minter, price0, mintAmt) {
 
   // Main contracts
   let vat = await VatContract.new({from:owner});
@@ -35,35 +30,32 @@ module.exports = async function(deployer, network, accounts) {
   let broker = await BrokerContract.new(vat.address, vault.address, {from:owner});
   let liquidator = await LiquidatorContract.new(vat.address, broker.address, {from:owner});
 
-  // Oracle. This will ultimately be a MakerDAO medianizer contract or similar
-  let oracle = await OracleContract.new(price0, true, {from:owner});
-
   // prepare zero ex contracts for deployment
   const sendDefaults = {from:owner, gas: 6721975, gasPrice: 100000000000}
   ZrxExchangeContract.setProvider(web3.currentProvider);
   ZrxExchangeContract.class_defaults = sendDefaults;
   ZrxProxyContract.setProvider(web3.currentProvider);
   ZrxProxyContract.class_defaults = sendDefaults;
-    
+
   // Tokens
-  let owedGem = await TokenContract.new({from:owner});
-  let heldGem = await TokenContract.new({from:owner});
-  let zrxGem = await TokenContract.new({from:owner});
-  await owedGem.mint(user, web3.utils.toBN(mintAmt), {from:owner}); // mint due tokens
-  await heldGem.mint(user, web3.utils.toBN(mintAmt), {from:owner}); // mint trade tokens
-  await zrxGem.mint(user, web3.utils.toBN(mintAmt), {from:owner}); // mint zrx tokens
-  await owedGem.mint(peer, web3.utils.toBN(mintAmt), {from:owner}); // mint due tokens
-  await heldGem.mint(peer, web3.utils.toBN(mintAmt), {from:owner}); // mint trade tokens
-  await zrxGem.mint(peer, web3.utils.toBN(mintAmt), {from:owner}); // mint zrx tokens
+  let owedGem = await TokenContract.new({from:minter});
+  let heldGem = await TokenContract.new({from:minter});
+  let zrxGem = await TokenContract.new({from:minter});
+  await owedGem.mint(user, bn(mintAmt), {from:minter}); // mint due tokens
+  await heldGem.mint(user, bn(mintAmt), {from:minter}); // mint trade tokens
+  await zrxGem.mint(user,  bn(mintAmt), {from:minter}); // mint zrx tokens
 
   // Zero Ex Exchange
   const zrxAssetData = assetDataUtils.encodeERC20AssetData(zrxGem.address);
   let zrxExchange = await ZrxExchangeContract.new(zrxAssetData, {from:owner});
   let zrxProxy = await ZrxProxyContract.new({from:owner});
   // register exchange and proxy with each other
-  await zrxProxy.addAuthorizedAddress(zrxExchange.address, {from:owner});
-  await zrxExchange.registerAssetProxy(zrxProxy.address, {from:owner});
-    
+  await zrxProxy.addAuthorizedAddress(zrxExchange.address);
+  await zrxExchange.registerAssetProxy(zrxProxy.address);
+
+  // Oracle. This will ultimately be MakerDAO medianizer contract
+  let oracle = await OracleContract.new(price0, true, {from:owner});
+
   // Zero Ex Exchange Wrapper
   let wrapper = await ZrxWrapperContract.new(
     vault.address, 
@@ -75,10 +67,7 @@ module.exports = async function(deployer, network, accounts) {
   );
 
   // The spotter. Takes the medianizer value for pair and pushes it into the Chief
-  let pairKey = web3.utils.soliditySha3(
-    {t:'address', v: owedGem.address}, 
-    {t:'address', v:heldGem.address}
-  );
+  let pairKey = k256(owedGem.address, heldGem.address);
   let spotter = await SpotterContract.new(broker.address, oracle.address, pairKey, {from:owner});
 
   // Authorize contracts to interact with each other
@@ -88,12 +77,33 @@ module.exports = async function(deployer, network, accounts) {
   vault.addAuth(exec.address, {from:owner});
   vault.addAuth(broker.address, {from:owner});
   broker.addAuth(spotter.address, {from:owner});
-  broker.file(web3.utils.toHex("wrapper"), wrapper.address, 1, {from:owner});
+  broker.file(hex("wrapper"), wrapper.address, 1, {from:owner});
   proxy.addAuth(vault.address, {from:owner});
   proxy.addAuth(wrapper.address, {from:owner});
   wrapper.addAuth(broker.address, {from:owner});
 
   // approve trading pair
-  exec.file(web3.utils.toHex("validTokenPair"), pairKey, 1, {from:owner});
+  exec.file(hex("validTokenPair"), pairKey, 1, {from:owner});
 
+  return { 
+    vat,
+    proxy,
+    vault,
+    exec,
+    broker,
+    liquidator,
+    owedGem,
+    heldGem,
+    zrxGem,
+    zrxExchange,
+    zrxProxy,
+    oracle,
+    wrapper,
+    spotter,
+    pairKey
+  };
 }
+
+module.exports = { deploySystem }
+
+

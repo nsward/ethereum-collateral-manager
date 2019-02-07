@@ -1,6 +1,6 @@
 // utils
-const { expectRevert, getTxTime, bn, k256, ethToWei } = require('./helpers/testHelpers');
-const { deploySystem } = require("./helpers/deploy");
+const { expectRevert, getTxTime, weiToRay, yearlyRateToRay, bn, k256, ethToWei } = require('./helpers/web3Helpers');
+const { deploySystem } = require("./helpers/setupTests");
 
 // modules
 const BigNum = require('bignumber.js'); // useful bignumber library
@@ -18,37 +18,13 @@ contract("Exec", function(accounts) {
   const owner = accounts[0];    // owner of the system contracts
   const admin = accounts[1];    // simulates the admin contract
   const user = accounts[2];     // owner of the collateral position
-  const peer = accounts[3];     // recipient of payments
-  const keeper = accounts[4];   // keeper / liquidator / biter
   const minter = accounts[5];   // can mint tokens so we have some to play with
-  const relayer = accounts[6];  // 0x relayer
-  const anyone = accounts[7];   // anyone. represents an outside bad actor / curious guy
   const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 
   // Value contract constructor defaults
   const price0 = new BigNum(ethToWei(100)); // 100 gem / 1 due token
   const mintAmt = new BigNum(ethToWei(100000));
-  
-  // system contracts
-  let vat;
-  let broker;
-  let exec;
-  let vault;
-  let liquidator;
-  let proxy;
-  let spotter;
-  let wrapper;
 
-  // external contracts and contract addresses
-  let zrxExchange;
-  let zrxProxy;
-  let oracle;
-  let owedGem;  // owed token contract
-  let heldGem;  // held token contract
-  let zrxGem;   // ZRX token contract
-
-  // mapping keys
-  let pairKey;                      // keccak256(_owedGem, _heldGem)
   let acctKey = k256(admin, user);  // keccak256(admin, user)
 
 
@@ -73,10 +49,6 @@ contract("Exec", function(accounts) {
 
   });
 
-  it("Check addAdminOwedGem", async() => {
-
-  });
-
   it("Check open with account-specific parameters", async() => {
     const owedTab = new BigNum(ethToWei(10));
     const callTime  = new BigNum(1000000);
@@ -86,12 +58,22 @@ contract("Exec", function(accounts) {
     // prepare to open account
     await owedGem.approve(proxy.address, owedTab, {from:user});
     await broker.setAllowance(admin, owedGem.address, owedTab, {from:user});
-    expect(await vat.allowances(acctKey, owedGem.address), "setAllowance").to.eq.BN(bn(owedTab));
+    expect(await vat.allowances(acctKey, owedGem.address), "setAllowance")
+      .to.eq.BN(bn(owedTab));
 
     // can open account correctly
-    const tx = await exec.open(owedTab, callTime, user, owedGem.address, useAdminParams, {from:admin});
-    expect(await vat.owedGems(paramsKey), "open owedGem").to.equal(owedGem.address);
-    expect(await vat.allowances(acctKey, owedGem.address), "open allowance").to.eq.BN(0);
+    const tx = await exec.open(
+      owedTab, 
+      callTime, 
+      user, 
+      owedGem.address, 
+      useAdminParams, 
+      {from:admin}
+    );
+    expect(await vat.owedGems(paramsKey), "open owedGem")
+      .to.equal(owedGem.address);
+    expect(await vat.allowances(acctKey, owedGem.address), "open allowance")
+      .to.eq.BN(0);
 
     // check resulting account
     const acct = await vat.accounts(acctKey);
@@ -105,10 +87,10 @@ contract("Exec", function(accounts) {
     expect(acct.paramsKey, "open paramsKey").to.equal(paramsKey);
     expect(acct.user, "open user").to.equal(user);
     expect(acct.admin, "open admin").to.equal(admin);
-    // TODO: check state?
 
     // check transfer
-    expect(await owedGem.balanceOf(user), "open transfer").to.eq.BN(bn(mintAmt.minus(owedTab)));
+    expect(await owedGem.balanceOf(user), "open transfer")
+      .to.eq.BN(bn(mintAmt.minus(owedTab)));
 
     // can't call open on an existing account
     await owedGem.approve(proxy.address, owedTab, {from:user});
@@ -117,6 +99,14 @@ contract("Exec", function(accounts) {
       exec.open(owedTab, callTime, user, owedGem.address, useAdminParams, {from:admin}),
       "ccm-vat-doOpen-account-exists"
     );
+  });
+
+  it("Check addAdminOwedGem", async() => {
+    const paramsKey = k256(admin);
+    
+    // set owed gem
+    await exec.setAdminOwedGem(owedGem.address, {from:admin});
+    expect(await vat.owedGems(paramsKey), "open owedGem").to.equal(owedGem.address);
   });
 
   it("Check open with admin-wide parameters", async() => {
@@ -128,7 +118,8 @@ contract("Exec", function(accounts) {
     // prepare to open account
     await owedGem.approve(proxy.address, owedTab, {from:user});
     await broker.setAllowance(admin, owedGem.address, owedTab, {from:user});
-    expect(await vat.allowances(acctKey, owedGem.address), "setAllowance").to.eq.BN(bn(owedTab));
+    expect(await vat.allowances(acctKey, owedGem.address), "setAllowance")
+      .to.eq.BN(bn(owedTab));
 
     // can't open account without admin owed gem set
     await expectRevert(
@@ -138,11 +129,11 @@ contract("Exec", function(accounts) {
 
     // set admin params
     await exec.setAdminOwedGem(owedGem.address, {from:admin});
-    expect(await vat.owedGems(paramsKey), "open owedGem").to.equal(owedGem.address);
 
     // can open account correctly
     const tx = await exec.openWithAdminParams(owedTab, callTime, user, {from:admin});
-    expect(await vat.allowances(acctKey, owedGem.address), "open allowance").to.eq.BN(0);
+    expect(await vat.allowances(acctKey, owedGem.address), "open allowance")
+      .to.eq.BN(0);
 
     // check resulting account
     const acct = await vat.accounts(acctKey);
@@ -156,10 +147,10 @@ contract("Exec", function(accounts) {
     expect(acct.paramsKey, "open paramsKey").to.equal(paramsKey);
     expect(acct.user, "open user").to.equal(user);
     expect(acct.admin, "open admin").to.equal(admin);
-    // TODO: check state?
 
     // check transfer
-    expect(await owedGem.balanceOf(user), "open transfer").to.eq.BN(bn(mintAmt.minus(owedTab)));
+    expect(await owedGem.balanceOf(user), "open transfer")
+      .to.eq.BN(bn(mintAmt.minus(owedTab)));
 
     // can't call open on an existing account
     await owedGem.approve(proxy.address, owedTab, {from:user});
@@ -168,6 +159,64 @@ contract("Exec", function(accounts) {
       exec.open(owedTab, callTime, user, owedGem.address, useAdminParams, {from:admin}),
       "ccm-vat-doOpen-account-exists"
     );
+  });
+
+  it("Check addAdminAsset", async() => {
+    const paramsKey = k256(admin);
+    const asset = {
+      gemAddr: heldGem.address,
+      tax: yearlyRateToRay(0.05).toFixed(0),
+      biteLimit: weiToRay(1.2).toFixed(0),
+      biteFee: weiToRay(1.2).toFixed(0),
+    }
+
+    // set owed gem
+    await exec.setAdminOwedGem(owedGem.address, {from:admin});
+
+    // add asset
+    await exec.addAdminAsset(asset.tax, asset.biteLimit, asset.biteFee, asset.gemAddr, {from:admin});
+
+    // check result
+    const returnedAsset = await vat.assets(paramsKey, asset.gemAddr);
+    expect(returnedAsset.tax).to.eq.BN(asset.tax);
+    expect(returnedAsset.biteLimit).to.eq.BN(asset.biteLimit);
+    expect(returnedAsset.biteFee).to.eq.BN(asset.biteFee);
+    expect(returnedAsset.use).to.eq.BN(1);
+  });
+
+  it("Check addAccountAsset", async() => {
+    const owedTab = new BigNum(ethToWei(10));
+    const callTime  = new BigNum(1000000);
+    const useAdminParams = false;
+    const paramsKey = k256(admin, user);
+    const asset = {
+      gemAddr: heldGem.address,
+      tax: yearlyRateToRay(0).toFixed(0),
+      biteLimit: yearlyRateToRay(0).toFixed(0),
+      biteFee: yearlyRateToRay(0).toFixed(0),
+    }
+
+    // open account
+    await owedGem.approve(proxy.address, owedTab, {from:user});
+    await broker.setAllowance(admin, owedGem.address, owedTab, {from:user});
+    await exec.open(
+      owedTab, 
+      callTime, 
+      user, 
+      owedGem.address, 
+      useAdminParams, 
+      {from:admin}
+    );
+
+    // add assset
+    await exec.addAccountAsset(asset.tax, asset.biteLimit, asset.biteFee, asset.gemAddr, user, {from:admin});
+
+    // check result
+    const returnedAsset = await vat.assets(paramsKey, asset.gemAddr);
+    expect(returnedAsset.tax).to.eq.BN(asset.tax);
+    expect(returnedAsset.biteLimit).to.eq.BN(asset.biteLimit);
+    expect(returnedAsset.biteFee).to.eq.BN(asset.biteFee);
+    expect(returnedAsset.use).to.eq.BN(1);
   });
 
 });

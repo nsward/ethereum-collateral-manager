@@ -1,24 +1,17 @@
 pragma solidity ^0.5.3;
 pragma experimental ABIEncoderV2;
 
-// import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "../lib/MathTools.sol";
 import "../lib/AuthTools.sol";
 
 contract Vat is AuthAndOwnable {
 
-    // constructor(address foo) AuthAndOwnable(foo) public {}
-
     using SafeMath for uint;
 
-    // Could just have a called bool? or even calltime == 0?
-    enum State{ Par, Call, Bit, Old }
-
-    struct Asset {
+    struct AssetClass {
         uint tax;       // interest rate paid on quantity of collateral not held in dueToken
         uint biteLimit; // Minimum Collateralization Ratio as a ray
         uint biteFee;   // liquidation penalty as a ray, temporarily doubles as discount for collateral
-        // bool use;       // approved for use  // TODO
         uint use;       // approved for use (0 = no, 1 = yes)
     }
     struct Order {
@@ -34,35 +27,31 @@ contract Vat is AuthAndOwnable {
     struct Account {
         uint    lastAccrual;    // time of last interest accrual
         uint    callTab;        // tab due at end of call
+        uint    callEnd;        // end of current callTime. 0 if not called
         uint    callTime;       // time allowed for a call
         uint    owedTab;        // max payout amt
         uint    owedBal;        // balance of owedGem currently held, denominated in owedGem
         uint    heldBal;        // balance of heldGem currently held, denominated in heldGem
-        bytes32 paramsKey;      // hash(admin, user) or hash(admin). Used to get owedGem and asset params
         address heldGem;        // trading token currently held
         address admin;          // admin of the account
         address user;           // user of the account
-        State   state;
+        bytes32 paramsKey;      // hash(admin, user) or hash(admin). Used to get owedGem and asset params
     }
 
-    // account key -> keccak256(admin, user)
-    // params key -> either keccak256(admin, user) or keccak256(admin)
+    // account key  = keccak256(admin, user)
+    // params key   = keccak256(admin, user) for account-specific params
+    //            or  keccak256(admin)) for admin-wide params
 
-    // TODO: make sure we're emitting sufficient events for users to find these
-    // for claim(). Note that this is the net payouts from all accounts user/contract 
-    // is involved in and is separate from the balance within accounts
-    // user => token address => balance of that token that is held in vault
-    // keccak256(user, token) => balance of that token that is held in vault
-    mapping(bytes32 => uint) public claims;
+    mapping (bytes32 => uint)       public claims;      // keccak256(user, token) => claimable balance
 
     mapping (bytes32 => Account)    public accounts;    // keccak256(admin, user) => Account
     mapping (bytes32 => Order)      public safeOrders;  // keccak256(admin, user) => order
     mapping (bytes32 => uint)       public noFills;     // for used safe orders
     mapping (bytes32 => address)    public owedGems;    // paramsKey => token
 
-    mapping (bytes32 => mapping(address => uint)) public agents;    // accountKey => agent => approval
-    mapping (bytes32 => mapping(address => uint)) public allowances;// accountKey => token => allowance
-    mapping (bytes32 => mapping(address => Asset)) public assets;  // paramKey => token => Asset
+    mapping (bytes32 => mapping(address => uint))   public agents;      // acctKey => agent => approval
+    mapping (bytes32 => mapping(address => uint))   public allowances;  // acctKey => token => allowance
+    mapping (bytes32 => mapping(address => AssetClass))  public assets;      // paramsKey => token => Asset
 
     //////////
     // Getters
@@ -78,6 +67,7 @@ contract Vat is AuthAndOwnable {
             if (which == "lastAccrual") got = bytes32(accounts[key].lastAccrual);
             if (which == "callTab")     got = bytes32(accounts[key].callTab);
             if (which == "callTime")    got = bytes32(accounts[key].callTime);
+            if (which == "callEnd")     got = bytes32(accounts[key].callEnd);
             if (which == "owedTab")     got = bytes32(accounts[key].owedTab);
             if (which == "owedBal")     got = bytes32(accounts[key].owedBal);
             if (which == "heldBal")     got = bytes32(accounts[key].heldBal);
@@ -94,52 +84,16 @@ contract Vat is AuthAndOwnable {
             if (which == "makerGem")    got = bytes32(bytes20(safeOrders[key].makerGem));
             if (which == "takerGem")    got = bytes32(bytes20(safeOrders[key].takerGem));
         }
-        // if (what == "asset") {
-        //     if (which == "use")         got == bytes32(assets[key].use);
-        //     if (which == "tax")         got == bytes32(assets[key].tax);
-        //     if (which == "biteLimit")   got == bytes32(assets[key].biteLimit);
-        //     if (which == "biteFee")     got == bytes32(assets[key].biteFee);
-        //     // if (which == "biteGap")     got == bytes32(assets[key].biteGap);
-        // }
     }
     function get(bytes32 what, bytes32 which, bytes32 key, address addr) external view returns (bytes32 got) {
         if (what == "asset") {
             if (which == "use") got = bytes32(assets[key][addr].use);
-            if (which == "tax")         got == bytes32(assets[key][addr].tax);
-            if (which == "biteLimit")   got == bytes32(assets[key][addr].biteLimit);
-            if (which == "biteFee")     got == bytes32(assets[key][addr].biteFee);
-            // if (which == "biteGap")     got == bytes32(assets[key].biteGap);
+            if (which == "tax")         got = bytes32(assets[key][addr].tax);
+            if (which == "biteLimit")   got = bytes32(assets[key][addr].biteLimit);
+            if (which == "biteFee")     got = bytes32(assets[key][addr].biteFee);
         }
     }
 
-    function getOrderData(bytes32 key) external view returns (bytes memory) {
-        return safeOrders[key].orderData;
-    }
-
-    /// Batched Getters
-
-
-    //////////
-    // Getters
-    /////////
-
-    // set() provides a standard method to set any value, although some are excluded
-    // intentionally becuse they can only be set once via setNew()
-    // example call to set:
-    // vat.set("account", "owedTab", acctKey, newOwedTab)
-    function set(bytes32 what, bytes32 key, address data) external auth {
-        if (what == "owedGem") owedGems[key] = data;
-    }
-    function set(bytes32 what, bytes32 key, address addr, uint data) external auth {
-        if (what == "allowance") allowances[key][addr] = data;
-        if (what == "agent") agents[key][addr] = data;
-    }
-    function set(bytes32 what, bytes32 key, uint data) external auth {
-        // if (what == "agent") agents[key] = data;
-        if (what == "noFill") noFills[key] = data;
-    }
-
-    // tODO
     function addTo(bytes32 what, bytes32 which, bytes32 key, uint amt) external auth {
         if (what == "account") {
             if (which == "owedBal") accounts[key].owedBal = accounts[key].owedBal.add(amt);
@@ -156,25 +110,41 @@ contract Vat is AuthAndOwnable {
     }
     function addTo(bytes32 what, bytes32 key, uint amt) external auth {
         if (what == "claim") claims[key] = claims[key].add(amt);
-        // if (what == "allowance") allowances[key] = allowances[key].add(amt);
     }
     function subFrom(bytes32 what, bytes32 key, uint amt) external auth {
         if (what == "claim") claims[key] = claims[key].sub(amt);
-        // if (what == "allowance") allowances[key] = allowances[key].sub(amt);
+    }
+    function addTo(bytes32 what, bytes32 key, address addr, uint amt) external auth {
+        if (what == "allowance") allowances[key][addr] = allowances[key][addr].add(amt);
+    }
+    function subFrom(bytes32 what, bytes32 key, address addr, uint amt) external auth {
+        if (what == "allowance") allowances[key][addr] = allowances[key][addr].sub(amt);
     }
 
+    // set() provides a standard method to set any value, although some are excluded
+    // intentionally becuse they can not be set after being initialized
+    // example call to set:
+    // vat.set("account", "owedTab", acctKey, newOwedTab)
+    function set(bytes32 what, bytes32 key, address data) external auth {
+        if (what == "owedGem") owedGems[key] = data;
+    }
+    function set(bytes32 what, bytes32 key, address addr, uint data) external auth {
+        if (what == "allowance")    allowances[key][addr] = data;
+        if (what == "agent")        agents[key][addr] = data;
+    }
+    function set(bytes32 what, bytes32 key, uint data) external auth {
+        if (what == "noFill")           noFills[key] = data;
+    }
     function set(bytes32 what, bytes32 which, bytes32 key, uint data) external auth {
         if (what == "account") {
-            if (which == "callTab") accounts[key].callTab = data;
-            if (which == "owedTab") accounts[key].owedTab = data;
-            if (which == "owedBal") accounts[key].owedBal = data;
-            if (which == "heldBal") accounts[key].heldBal = data;
-
-            // TODO: make unsettable?
+            if (which == "callTab")     accounts[key].callTab = data;
+            if (which == "owedTab")     accounts[key].owedTab = data;
+            if (which == "owedBal")     accounts[key].owedBal = data;
+            if (which == "heldBal")     accounts[key].heldBal = data;
+            if (which == "callEnd")     accounts[key].callEnd = data;
+            if (which == "callTime")    accounts[key].callTime = data;
             if (which == "lastAccrual") accounts[key].lastAccrual = data;
-            if (which == "callTime") accounts[key].callTime = data;
         }
-        // if (what == "asset" && which == "use") assets[key].use = data;
     }
     function set(bytes32 what, bytes32 which, bytes32 key, bytes32 data) external auth {
         if (what == "account" && which == "paramsKey") accounts[key].paramsKey = data;
@@ -182,16 +152,14 @@ contract Vat is AuthAndOwnable {
     function set(bytes32 what, bytes32 which, bytes32 key, address data) external auth {
         if (what == "account") {
             if (which == "heldGem") accounts[key].heldGem = data;
-
-            // TODO: make unsettable?
-            if (which == "admin") accounts[key].admin = data;
-            if (which == "user") accounts[key].user = data;
+            if (which == "admin")   accounts[key].admin = data;
+            if (which == "user")    accounts[key].user = data;
         }
     }
 
     /// Batch setters
 
-    function set(bytes32 what, bytes32 key, address gem, Asset memory _asset) public auth { // TODO: calldata?
+    function set(bytes32 what, bytes32 key, address gem, AssetClass memory _asset) public auth { // TODO: calldata?
         if (what == "asset") assets[key][gem] = _asset;
     }
     function set(bytes32 what, bytes32 key, Account memory _account) public auth {  // TODO: calldata?
@@ -204,35 +172,12 @@ contract Vat is AuthAndOwnable {
         if (what == "asset" && which == "use") assets[key][addr].use = data;
     }
 
-    // make this addToBals
-    function setPosition(bytes32 acctKey, uint owedBal, uint heldBal) external auth {
-        setPosition(acctKey, owedBal, heldBal, address(0));
-    }
-    function setPosition(bytes32 acctKey, uint owedBal, uint heldBal, address heldGem) public auth {
-        if (heldGem != address(0)) { accounts[acctKey].heldGem = heldGem; }
-        accounts[acctKey].owedBal = owedBal;
-        accounts[acctKey].heldBal = heldBal;
-    }
-
     function safeSetPosition(bytes32 acctKey, address heldGem, uint heldBal) external auth {
         Account storage acct = accounts[acctKey];
         require(acct.heldBal == 0, "ccm-vat-safeSetPosition-position-exists");
         acct.heldGem = heldGem;
         acct.heldBal = heldBal;
     }
-    // function addOwedBal(bytes32 acctKey, uint amt) external auth {
-    //     accounts[acctKey].owedBal = SafeMath.add(accounts[acctKey].owedBal, amt);
-    // }
-    // function addHeldBal(bytes32 acctKey, uint amt) external auth {
-    //     accounts[acctKey].heldBal = SafeMath.add(accounts[acctKey].heldBal, amt);
-    // }
-    // function subOwedBal(bytes32 acctKey, uint amt) external auth {
-    //     accounts[acctKey].owedBal = SafeMath.sub(accounts[acctKey].owedBal, amt);
-    // }
-    // function subHeldBal(bytes32 acctKey, uint amt) external auth {
-    //     accounts[acctKey].heldBal = SafeMath.sub(accounts[acctKey].heldBal, amt);
-    // }
-
 
     // do not include wrapper or fillAmt in hash, as these could be used 
     // to make the same order return a different hash but still be fillable
@@ -290,29 +235,21 @@ contract Vat is AuthAndOwnable {
         owedGem = owedGems[paramsKey];
     }
 
-    function safeSetAsset(bytes32 paramsKey, address gem, Asset memory _asset) public auth {         // TODO: calldata?
+    function safeSetAsset(bytes32 paramsKey, address gem, AssetClass memory _asset) public auth {         // TODO: calldata?
         require(assets[paramsKey][gem].biteLimit == 0, "ccm-vat-safeSetAsset-asset-exists");
         assets[paramsKey][gem] = _asset;
     }
 
-    function doOpen(bytes32 acctKey, Account memory acct) public auth returns (address) {   // TODO: calldata?
+    function doOpen(bytes32 acctKey, Account memory acct) public auth returns (bool) {   // TODO: calldata?
         require(accounts[acctKey].lastAccrual == 0, "ccm-vat-doOpen-account-exists");
         address owedGem = owedGems[acct.paramsKey];
         allowances[acctKey][owedGem] = allowances[acctKey][owedGem].sub(acct.owedTab);
         accounts[acctKey] = acct;
 
-        return owedGem;
+        return true;
     }
 
-    // function addClaim(bytes32 claimKey, uint amt) external auth {
-    //     claims[claimKey] = SafeMath.add(claims[claimKey], amt);
-    // }
-
-    // function subClaim(bytes32 claimKey, uint amt) external auth {
-    //     claims[claimKey] = SafeMath.sub(claims[claimKey], amt);
-    // }
-
-    function updateTab(bytes32 key) external auth returns (uint) {
+    function updateTab(bytes32 key) public auth returns (uint) {
         Account storage acct = accounts[key];
 
         // no time passed since last update
@@ -326,158 +263,28 @@ contract Vat is AuthAndOwnable {
         // get tax for the trade token
         uint tax = assets[acct.paramsKey][acct.heldGem].tax;
 
-        acct.owedTab = MathTools.accrueInterest(
+        acct.owedTab = MathTools.getInterest(
             acct.owedTab.sub(acct.owedBal),
             tax,
             now.sub(acct.lastAccrual)
-        );
+        ).add(acct.owedTab);
 
         return acct.owedTab;
     }
-    // function safeSetAllowance(bytes32 acctKey, address guy, address gem, uint allowance) external auth {
-    //     require(isUserOrAgent(acctKey, guy), "ccm-vat-safeSetAllowance-unauthorized");
-    //     allowances[acctKey][gem] = allowance;
-    // }
+
+    function doCall(bytes32 acctKey, uint callTab) external auth returns (uint) {
+        updateTab(acctKey);
+        Account storage acct = accounts[acctKey];
+        // require(acct.admin == caller, "ccm-vat-doCall-not-admin");   // checked by acctKey
+        require(callTab <= acct.owedTab, "ccm-vat-doCall-callTab-invalid");
+        acct.callTab = callTab;
+        uint callEnd = acct.callTime.add(now);
+        acct.callEnd = callEnd;
+        return callEnd;
+    }
 
     function isUserOrAgent(bytes32 acctKey, address guy) public view returns (bool) {
         return (guy == accounts[acctKey].user || agents[acctKey][guy] == 1);
     }
-
-
-
-
-    // // check account empty
-    // // check allowance > acct.owedTab
-    // // new allowance = allowance - acct.owedTab
-    // // store account
-    // function doOpenWithAdminOwedGem(
-    //     bytes32 acctKey, 
-    //     bytes32 paramsKey, 
-    //     Account calldata acct
-    // )
-    //     external auth returns (address) 
-    // {
-    //     require(accounts[acctKey].lastAccrual == 0, "ccm-vat-doOpen-account-exists");
-    //     address owedGem = owedGems[paramsKey];
-    //     allowances[key][owedGem] = SafeMath.sub(allowances[key][owedGem], acct.owedTab);
-    //     accounts[acctKey] = acct;
-
-    //     return owedGem;
-    // }
-
-    // function doOpenWithNewOwedGem(
-    //     bytes32 acctKey,
-    //     bytes32 paramsKey,
-    //     address owedGem,
-    //     Account calldata acct
-    // )
-    //     external auth
-    // {
-    //     require(accounts[acctKey].lastAccrual == 0, "ccm-vat-doOpen-account-exists");
-    //     // TODO:
-    //     // require(owedGems[paramsKey] == 0) ?? -- Not unless we're sure we're deleting old owedGems
-    //     owedGems[paramsKey] = owedGem;
-    //     allowances[key][owedGem] = SafeMath.sub(allowances[key][owedGem], acct.owedTab);
-    //     accounts[acctKey] = acct;
-    // }
-
-
-    // function editAccount(bytes32 key, bytes32 which, uint data) external auth {
-    //     if (which == "callTab") accounts[key].callTab = data;
-    //     if (which == "dueTab") accounts[key].dueTab = data;
-    //     if (which == "dueBalance") accounts[key].dueBalance = data;
-    //     if (which == "tradeBalance") accounts[key].tradeBalance = data;
-    // }
-
-    // function editAccount(bytes32 key, bytes32 which, address data) external auth {
-    //     if (which == "tradeToken") accounts[key].tradeToken = data;
-    // }
-
-    // struct BrokerAcct {
-    //     uint dueBalance;
-    //     uint tradeBalance;
-    //     uint lastAccrual;
-    //     uint allowance;
-    //     address user;
-    // }
-
-    // struct AdminAcct {
-    //     uint callTab;
-    //     uint callTime;
-    //     uint dueTab;
-    //     address admin;
-    //     bool useAdminParams;
-    // }
-    // struct Account {
-    //     uint    callTab;        // tab due at end of current call
-    //     uint    dueTab;         // max payout amt 
-    //     uint    dueBalance;     // balance of due tokens currently held, denominated in due tokens
-    //     uint    tradeBalance;   // trading token balance. denominated in the trading token
-    //     uint    callTime;       // time given for a call 
-    //     uint    lastAccrual;    // Time of last interest accrual
-    //     address user;           // address of user / trader / payer
-    //     address admin;          // address of managing contract 
-    //     address tradeToken;     // trading token currently held
-    //     bool    useAdminParams; // use exec-contract-wide paramaters 
-    //     State   state;
-    //     //uint    allowance;      // must be set by user before open(). Prevents malicious
-    //                             // contract from taking token allowances made to this contract
-    // }
-
-    // function readAccount(bytes32 key, bytes)
-
-    // function editAccount(bytes32 key, bytes32 which, State calldata data) external auth {
-    //     if (which == "state") account[key].state = data;
-    // }
-
-    //mapping (bytes32 => Asset)      public assets;      // hash(admin, user, token) or hash(admin, token)
-    
-
-    
-
-
-    //mapping (bytes32 => uint)       public agents;      // keccak256(admin, user, pal)
-    //mapping (bytes32 => uint)       public allowances;  // hash(admin, user, token)
-
-    // TODO: set these values
-    //uint256 public accountId;               // Incremented for keepers to find accounts
-    // TODO: should be able to have a tab below this, but unable to trade due token 
-    // for other tokens, bc the only danger of having a small amt in the acct is
-    // getting keepers to bite it
-    //uint256 public minTab = 0.005 ether;    // not profitable for keepers to bite below this. TODO: this is just based on the dai cdp minimum. Need to determine what this should be
-    //uint256 public maxTax = uint(-1);       // maximum interest rate
-    //uint256 public maxTab = uint(-1);     // tab above which keepers can bite
-    
-    
-    //mapping (bytes32 => AdminParam) public adminParams;   // Contract-wide Asset Paramaters
-    // Only internal bc of compiler complaint about nested structs. Need to create getter
-    
-    //mapping (uint256 => bytes32) public accountKeys;    // accountId => accountKey
-
-    // 
-    // mapping (bytes32 => address) public adminDueTokens; // or address?
-    // mapping (bytes32 => address) public accountDueTokens;   // keccak256(admin, user)
-
-    
-
-    
-
-    
-
-
-
-    // OR: combine these into one mapping access with two different hashes??
-    // mapping (bytes32 => AssetClass) public accountAssets;   // keccak256(admin, user, token)
-    // mapping (bytes32 => AssetClass) public adminAssets;     // keccak256(admin, token)
-
-    
-
-    // if one address stored in bytes32, the address is just the first 20 bytes of the variable
-    // Should I store 2 different assets mappings?
-    // - if admin-wide assets are going to be keccak256(adminAddress, tokenAddress) and
-    //   acct-specific assets are going to be address+12 empty bytes, the acct-specific asset
-    //   keys are no longer uniformaly distributed over the entire set, but rather uniformly
-    //   distributed over the subset of keys with the last 12 bytets empty. Does this increase
-    //   the probability of a collision with a hash (admin-wide keys) to a significant degree?
 
 }

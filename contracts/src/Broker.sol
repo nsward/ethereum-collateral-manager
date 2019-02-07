@@ -1,8 +1,8 @@
 pragma solidity ^0.5.3;
 
-// import "openzeppelin-solidity/contracts/math/SafeMath.sol";
 import "./interfaces/VaultLike.sol";
 import "./interfaces/WrapperLike.sol";
+import "./events/BrokerEvents.sol";
 import "../lib/MathTools.sol";
 import "../lib/AuthTools.sol";
 
@@ -21,17 +21,14 @@ contract VatLike {
     function isUserOrAgent(bytes32, address) public view returns (bool);
     function owedAndHeldGemsByAccount(bytes32) external view returns (address, address, bytes32);
     function safeSetPosition(bytes32, address, uint) external;
-
 }
 
-// could be just Owned depending how spotter is handled
-contract Broker is AuthAndOwnable {
+contract Broker is AuthAndOwnable, BrokerEvents {
 
     using SafeMath for uint;
 
-    mapping (address => uint256) public wrappers;   // valid exchange wrappers. keccak256(wrapperAddress, exchangeAddress) => bool
-    //mapping (bytes32 => address) public spotters;   // keccak256(dueToken, tradeToken) => spotter
-    mapping (bytes32 => uint256) public spotPrices;  // keccak256(dueToken, tradeToken) => due tokens / 1 trade token
+    mapping (address => uint256) public wrappers;   // valid exchange wrappers. address => 0 if invalid, 1 if valid
+    mapping (bytes32 => uint256) public spotPrices;  // keccak256(dueToken, tradeToken) => wad due tokens / 1 wei trade token
 
     VatLike public vat;
     VaultLike public vault;
@@ -44,13 +41,11 @@ contract Broker is AuthAndOwnable {
     // Sets account allowance, can only be called by the user of the account
     // or an approved pal. Prevents an attack where anyone could monitor the
     // approval events from popular ERC20s waiting for approvals to this contract,
-    // then call open() from a malicious contract and effectively steal all
-    // approved funds
+    // then call open() from a malicious contract and steal all approved funds
     function setAllowance(address admin, address gem, uint allowance) external {
-        // vat.safeSetAllowance(acctKey, msg.sender, gem, allowance);
-        // require(vat.isUserOrAgent(acctKey, msg.sender), "ccm-broker-setAllowance-unauthorized");
         bytes32 acctKey = MathTools.k256(admin, msg.sender);
         vat.set("allowance", acctKey, gem, allowance);
+        emit SetAllowance(admin, msg.sender, gem, allowance);
     }
 
     function setAgent(bytes32 acctKey, address guy, bool trust) external {
@@ -61,9 +56,29 @@ contract Broker is AuthAndOwnable {
         vat.set("agent", acctKey, guy, trust ? 1 : 0);
     }
 
-    // TODO: ** nonReentrant?
+    function free(bytes32 acctKey, address gem, uint amt) external {
+        require(vat.isUserOrAgent(acctKey, msg.sender), "ccm-broker-free-not-authorized");
+        vat.updateTab(acctKey);
+        (address owedGem, address heldGem, ) = vat.owedAndHeldGemsByAccount(acctKey);
+
+        require(gem == owedGem || gem == heldGem, "ccm-broker-free-gem-not-possessed");
+
+        if (gem == heldGem) {
+            vat.subFrom("account", "heldGem", amt);
+        } else if (gem == owedGem) {
+            vat.subFrom("account", "owedGem", amt);
+        }
+
+        address user = address(bytes20(vat.get("account", "user", acctKey)));
+
+        require(safe(acctKey), "ccm-broker-free-resulting-account-unsafe");
+
+        bytes32 claimKey = MathTools.k256(user, gem);
+        vat.addTo("claims", claimKey, amt);
+    }
+
     // Note: no allowance needed or decremented here, since funds come from msg.sender
-    function lock(bytes32 acctKey, address gem, uint amt) external returns (bool) {
+    function lock(bytes32 acctKey, address gem, uint amt) external {
         require(gem != address(0) && amt > 0, "ccm-broker-lock-inputs-invalid");
 
         // get the owedToken and asset.use
@@ -75,18 +90,16 @@ contract Broker is AuthAndOwnable {
         if (gem == owedGem) {
             require(vault.take(gem, msg.sender, amt), "ccm-broker-lock-transfer-failed");
             vat.addTo("account", "owedBal", acctKey, amt);
-            // vat.addOwedBal(acctKey, amt);
-            return true;
+            return;
         } else if (gem == heldGem) {
             require(vault.take(gem, msg.sender, amt), "ccm-broker-lock-transfer-failed");
             vat.addTo("account", "heldBal", acctKey, amt);
-            // vat.addHeldBal(acctKey, amt);
-            return true;
+            return;
         } else if (heldGem == address(0)) {
             require(uint(vat.get("asset", "use", paramKey, gem)) == 1, "ccm-broker-lock-gem-unapproved");
             require(vault.take(gem, msg.sender, amt), "ccm-broker-lock-transfer-failed");
             vat.safeSetPosition(acctKey, gem, amt);
-            return true;
+            return;
         } else {
             revert("ccm-broker-lock-invalid-gem");
         }
@@ -107,21 +120,23 @@ contract Broker is AuthAndOwnable {
         // regardless of biteLimit or interest charged
         if (owedBal >= owedTab) { return true; }
         
+        // debit. interest compounded once per second on the quantity (owedTab - owedBal)
+        // over the time (now - lastAccrual). Debit also include the minimum
+        // collateralization ratio (biteLimit)
         uint debit = MathTools.rmul(
-            MathTools.accrueInterest(
+            MathTools.getInterest(
                 owedTab.sub(owedBal),
                 tax,
                 now.sub(lastAccrual)
-            ),
+            ).add(owedTab),
             biteLimit
         );
         uint val = spotPrices[MathTools.k256(owedGem, heldGem)];
-        uint credit = SafeMath.add(owedBal, SafeMath.mul(heldBal, val));
+        uint credit = SafeMath.add(owedBal, MathTools.convertBalance(heldBal, val));
 
         return credit >= debit;
     }
 
-    // TODO nonReentrant
     // TODO: provide an option to add order to noFills
     function swap(
         bytes32 acctKey,
@@ -133,9 +148,7 @@ contract Broker is AuthAndOwnable {
         uint fillAmt,
         bytes memory orderData
     ) 
-    public returns (bool) {
-        // TODO: add delete safe order
-
+    public {
         // must be approved wrapper
         require(wrappers[wrapper] == 1, "ccm-broker-swap-invalid-wrapper");
 
@@ -156,7 +169,7 @@ contract Broker is AuthAndOwnable {
         // - giving up trade token, getting due token
         // - giving up trade token, getting a new trade token
 
-        uint partialAmt = MathTools.getPartialAmt(makerAmt, takerAmt, fillAmt); // todo: stack too deep
+        uint partialAmt = MathTools.getPartialAmt(makerAmt, takerAmt, fillAmt);
 
         // giving up owed token
         if (takerGem == owedGem) {
@@ -164,22 +177,10 @@ contract Broker is AuthAndOwnable {
                 // giving up due token, getting more of our current trade token
                 _swapOwedForHeld(acctKey, fillAmt, partialAmt);
 
-                // update balances
-                // vat.subOwedBal(acctKey, fillAmt);
-                // vat.addHeldBal(partialAmt);
-                // vat.subFrom("account", "owedBal", acctKey, fillAmt);
-                // vat.addTo("account", "heldBal", acctKey, 
-                //     MathTools.getPartialAmt(makerAmt, takerAmt, fillAmt));  // todo: stack too deep
             } else {
                 // giving up due token, getting a new trade token
                 _swapOwedForNewHeld(acctKey, paramKey, makerGem, fillAmt, partialAmt);
 
-                // require(uint(vat.get("asset", "use", paramKey, makerGem)) == 1, "ccm-broker-lock-gem-unapproved");
-                // // vat.subOwedBal(acctKey, fillAmt);
-                // vat.subFrom("account", "owedBal", acctKey, fillAmt);
-                // // also checks that heldBal == 0
-                // vat.safeSetPosition(acctKey, makerGem, 
-                //     MathTools.getPartialAmt(makerAmt, takerAmt, fillAmt));
             }
         } else {
             require(takerGem == heldGem, "ccm-broker-swap-invalid-trading-pair");
@@ -189,41 +190,17 @@ contract Broker is AuthAndOwnable {
                 // giving up trade token, getting owed token
                 _swapHeldForOwed(acctKey, fillAmt, partialAmt);
 
-                // vat.subHeldBal(acctKey, fillAmt);
-                // vat.addOwedBal(acctKey, partialAmt);
-                // vat.subFrom("account", "heldBal", acctKey, fillAmt);
-                // vat.addTo("account", "owedBal", acctKey, partialAmt);
             } else {
                 // giving up trade token, getting a new trade token
                 _swapHeldForNewHeld(acctKey, paramKey, makerGem, heldGem, fillAmt, partialAmt);
-
-                // require(uint(vat.get("asset", "use", paramKey, makerGem)) == 1, "ccm-broker-lock-gem-unapproved");
-                // // make sure we can cover the fillAmt. This is check by the DSMath sub()
-                // // in every other case, but we must be explicit about it here
-                // uint heldBal = uint(vat.get("account", "heldBal", acctKey));
-                // require(heldBal >= fillAmt, "ccm-broker-swap-insufficient-tradeBalance");
-                // // figure out how to handle excess current tradeToken
-                // // if fillAmt < tradeBalance -> we'll have some left over. Can we just add this to claims? or should we not allow this?
-                // if (heldBal > fillAmt) {
-                //     // add difference to claims
-                //     address user = address(bytes20(vat.get("account", "user", acctKey)));    // todo:stack too deep
-                //     bytes32 claimKey = MathTools.k256(user, heldGem);
-                //     // vat.addTo("claim", claimKey, heldBal.sub(fillAmt));
-                //     vat.addTo("claim", claimKey, heldGem), heldBal.sub(fillAmt));
-                //     // vat.addClaim(
-                //     //     claimKey,
-                //     //     SafeMath.sub(heldBal, fillAmt)
-                //     // );
-                // }
-                // vat.set("account", "heldGem", acctKey, makerGem);
-                // vat.set("account", "heldBal", acctKey, partialAmt);
 
             }
         }
 
         // make sure the account is still safe
         require(safe(acctKey), "ccm-broker-swap-resulting-position-unsafe");
-
+        
+        // take the trade
         _executeTrade(
             wrapper,
             msg.sender,
@@ -234,20 +211,6 @@ contract Broker is AuthAndOwnable {
             fillAmt,
             orderData
         );
-
-        // reads:
-        // - safeArgs
-        // owedGem
-        // heldGem
-        // asset.use
-        // isUserOrAgent()
-        // 
-
-        // writes:
-        // updateTab()
-        // owedBal
-        // heldBal
-        // heldGem
     }
 
     function _swapOwedForHeld(bytes32 acctKey, uint fillAmt, uint partialAmt) internal {
@@ -257,7 +220,6 @@ contract Broker is AuthAndOwnable {
 
     function _swapOwedForNewHeld(bytes32 acctKey, bytes32 paramKey, address makerGem, uint fillAmt, uint partialAmt) internal {
         require(uint(vat.get("asset", "use", paramKey, makerGem)) == 1, "ccm-broker-lock-gem-unapproved");
-        // vat.subOwedBal(acctKey, fillAmt);
         vat.subFrom("account", "owedBal", acctKey, fillAmt);
         // also checks that heldBal == 0
         vat.safeSetPosition(acctKey, makerGem, partialAmt);
@@ -271,23 +233,16 @@ contract Broker is AuthAndOwnable {
     function _swapHeldForNewHeld(bytes32 acctKey, bytes32 paramKey, address makerGem, address heldGem, uint fillAmt, uint partialAmt) internal {
         require(uint(vat.get("asset", "use", paramKey, makerGem)) == 1, "ccm-broker-lock-gem-unapproved");
 
-        // make sure we can cover the fillAmt. This is checked by the DSMath sub()
+        // make sure we can cover the fillAmt. This is checked by the safe sub()
         // in every other case, but we must be explicit about it here
         uint heldBal = uint(vat.get("account", "heldBal", acctKey));
         require(heldBal >= fillAmt, "ccm-broker-swap-insufficient-tradeBalance");
 
-        // figure out how to handle excess current tradeToken
-        // if fillAmt < tradeBalance -> we'll have some left over. Can we just add this to claims? or should we not allow this?
         if (heldBal > fillAmt) {
             // add difference to claims
-            address user = address(bytes20(vat.get("account", "user", acctKey)));    // todo:stack too deep
+            address user = address(bytes20(vat.get("account", "user", acctKey)));
             bytes32 claimKey = MathTools.k256(user, heldGem);
             vat.addTo("claim", claimKey, heldBal.sub(fillAmt));
-            // vat.addTo("claim", claimKey, heldGem, heldBal.sub(fillAmt));
-            // vat.addClaim(
-            //     claimKey,
-            //     SafeMath.sub(heldBal, fillAmt)
-            // );
         }
 
         vat.set("account", "heldGem", acctKey, makerGem);
@@ -317,8 +272,6 @@ contract Broker is AuthAndOwnable {
             tradeOrigin,
             makerGem,
             takerGem,
-            makerAmt,
-            takerAmt,
             fillAmt,
             orderData
         );
@@ -329,7 +282,6 @@ contract Broker is AuthAndOwnable {
         );
 
         // transfer from exchange wrapper back to vault
-        // TODO: ** will need to make sure wrappers are all approving() sufficient amounts
         vault.takeFromWrapper(
             makerGem, 
             wrapper,
@@ -337,10 +289,8 @@ contract Broker is AuthAndOwnable {
         );
     }
 
-    // TODO nonReentrant
-    function claim(address gem, uint amt) external returns (bool) {
+    function claim(address gem, uint amt) external {
         bytes32 claimKey = MathTools.k256(msg.sender, gem);
-        // vat.subClaim(claimKey, amt);
         vat.subFrom("claim", claimKey, amt);
         require(vault.give(gem, msg.sender, amt), "ccm-broker-claim-transfer-failed");
     }
@@ -358,6 +308,5 @@ contract Broker is AuthAndOwnable {
         if (what == "vat") vat = VatLike(data);
         if (what == "vault") vault = VaultLike(data);
     }
-
 
 }

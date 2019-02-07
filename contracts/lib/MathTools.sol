@@ -1,7 +1,5 @@
 pragma solidity ^0.5.0;
 
-// import "openzeppelin-solidity/contracts/math/SafeMath.sol";
-
 // OpenZeppelin SafeMath + revert strings
 /**
  * @title SafeMath
@@ -70,8 +68,6 @@ library SafeMath {
 
 library MathTools {
 
-    // using SafeMath for uint256;
-
     // From DappHub's DSMath, but uses SafeMath instead of DSMath overflow checks
     function rmul(uint x, uint y) internal pure returns (uint z) {
         // z = add(mul(x, y), RAY / 2) / RAY;
@@ -98,7 +94,7 @@ library MathTools {
     //    floor[(n-1) / 2] = floor[n / 2].
     //
     function rpow(uint x, uint n) internal pure returns (uint z) {
-        uint RAY;
+        uint RAY = 10 ** 27;
         z = n % 2 != 0 ? x : RAY;
 
         for (n /= 2; n != 0; n /= 2) {
@@ -110,20 +106,28 @@ library MathTools {
         }
     }
 
-
-    // Go from wad (10**18) to ray (10**27)
-    function wadToray(uint256 wad) internal pure returns (uint) {
-        return SafeMath.mul(wad, 10 ** 9);
-    }
-
-    // // Go from wei to ray (10**27)
-    // function weiToRay(uint _wei) internal pure returns (uint) {
-    //     return SafeMath.mul(_wei, 10 ** 27);
-    // } 
-
-    // could make this public for ease of use?
+    // returns new principal with interest accrued
     function accrueInterest(uint principal, uint rate, uint age) internal pure returns (uint) {
         return rmul(principal, rpow(rate, age));
+    }
+
+    // returns the interest amount accrued
+    function getInterest(uint principal, uint rate, uint age) internal pure returns (uint) {
+        return SafeMath.sub(accrueInterest(principal, rate, age), principal);
+    }
+
+    // TODO:
+    function convertBalance(uint balance, uint spotPrice) internal pure returns (uint) {
+        return SafeMath.mul(balance, spotPrice);
+    }
+
+    // TODO: rethink the way we're taking the biteFee
+    function getBiteCost(uint collateralValue, uint biteFee) internal pure returns (uint) {
+        uint RAY = 10 ** 27;
+
+        if (biteFee <= RAY) { return collateralValue; }
+
+        return rmul(collateralValue, SafeMath.sub(biteFee, RAY));
     }
 
     // Returns the value of a partial fill given an implied price (makerAmt / takerAmt)
@@ -142,5 +146,13 @@ library MathTools {
 
     function k256(address _a) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(_a));
+    }
+
+     // From OpenZeppelin's math library
+     /**
+    * @dev Returns the largest of two numbers.
+    */
+    function max(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a >= b ? a : b;
     }
 }

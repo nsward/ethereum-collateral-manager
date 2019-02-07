@@ -1,100 +1,9 @@
 // From dYdX Protocol https://github.com/dydxprotocol/protocol
-
-// const Web3 = require('web3');
-// const web3Instance = new Web3(web3.currentProvider);
-
-// const BigNumber = require('bignumber.js');
-// const { promisify } = require("es6-promisify");
 const ethUtil = require('ethereumjs-util');
 
-// const HeldToken = artifacts.require("TokenA");
-// const OwedToken = artifacts.require("TokenB");
-// let { ZeroExExchangeV2 } = require("../contracts/ZeroExV2");
-
-// const { ADDRESSES, DEFAULT_SALT, ORDER_TYPE } = require('./Constants');
 const { addressToBytes32, concatBytes } = require('./bytesHelpers');
 
-// const BASE_AMOUNT = new BigNumber('1098623452345987123')
-
 const ORDER_TYPE = "zeroExV2";
-
-// async function createSignedV2SellOrder(
-//     exchange,
-//     maker,
-//     taker,
-//     makerGem,
-//     takerGem,
-//     makerAmt,
-//     takerAmt,
-//     feeRecipient,
-//     sender,
-//     makerFee,
-//     takerFee,
-//     expirationTimeSeconds,
-//     salt
-// ) {
-//   let order = {
-//     type: "zeroExV2",
-//     exchangeAddress: exchange,
-
-//     makerAddress: maker,
-//     takerAddress: taker,
-//     feeRecipientAddress: feeRecipient,
-//     senderAddress: sender,
-
-//     makerFee: makerFee,
-//     takerFee: takerFee,
-//     expirationTimeSeconds: expirationTimeSeconds,
-//     salt: salt,
-
-//     // owedToken
-//     makerTokenAddress: makerGem,
-//     makerAssetAmount: makerAmt,
-
-//     // heldToken
-//     takerTokenAddress: takerGem,
-//     takerAssetAmount: takerAmt
-//   };
-
-//   order.signature = await signV2Order(order);
-
-//   return order;
-// }
-
-// async function createSignedV2BuyOrder(
-//   accounts,
-//   {
-//     salt = DEFAULT_SALT,
-//     feeRecipientAddress,
-//   } = {}
-// ) {
-//   let order = {
-//     type: ORDER_TYPE.ZERO_EX_V2,
-//     exchangeAddress: ZeroExExchangeV2.address,
-
-//     makerAddress: accounts[2],
-//     takerAddress: ADDRESSES.ZERO,
-//     feeRecipientAddress: feeRecipientAddress || accounts[4],
-//     senderAddress: ADDRESSES.ZERO,
-
-//     makerFee: BASE_AMOUNT.times(.02012398).floor(),
-//     takerFee: BASE_AMOUNT.times(.1019238).floor(),
-//     expirationTimeSeconds: new BigNumber(100000000000000),
-//     salt: new BigNumber(salt),
-
-//     // heldToken
-//     makerTokenAddress: HeldToken.address,
-//     makerAssetAmount: BASE_AMOUNT.times(30.091234687).floor(),
-
-//     // owedToken
-//     takerTokenAddress: OwedToken.address,
-//     takerAssetAmount: BASE_AMOUNT.times(10.092138781).floor(),
-//   };
-
-//   order.signature = await signV2Order(order);
-
-//   return order;
-// }
 
 async function createSignedZrxOrder(
     exchangeAddr,
@@ -204,16 +113,37 @@ function getV2OrderHash(order) {
   return retVal;
 }
 
+function toBytes32(val) {
+  return web3.utils.hexToBytes(
+    web3.utils.padLeft(web3.utils.toHex(val), 64)
+  );
+}
+
+function zrxOrderToBytes(order) {
+  const v = []
+    .concat(toBytes32(order.makerAddress))
+    .concat(toBytes32(order.takerAddress))
+    .concat(toBytes32(order.feeRecipientAddress))
+    .concat(toBytes32(order.senderAddress))
+    .concat(toBytes32(order.makerAssetAmount))
+    .concat(toBytes32(order.takerAssetAmount))
+    .concat(toBytes32(order.makerFee))
+    .concat(toBytes32(order.takerFee))
+    .concat(toBytes32(order.expirationTimeSeconds))
+    .concat(toBytes32(order.salt))
+    .concat(toBytes32(order.signature));
+  return web3.utils.bytesToHex(v);
+}
+
 function addressToAssetData(address) {
   const assetDataPrepend = '0xf47261b0';
   return concatBytes(assetDataPrepend, addressToBytes32(address));
 }
 
 module.exports = {
-  // createSignedV2SellOrder,
-  // createSignedV2BuyOrder,
   createSignedZrxOrder,
   signV2Order,
   getV2OrderHash,
   addressToAssetData,
+  zrxOrderToBytes
 }

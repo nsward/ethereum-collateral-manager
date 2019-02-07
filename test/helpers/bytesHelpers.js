@@ -1,8 +1,5 @@
 // From dYdX Protocol https://github.com/dydxprotocol/protocol
 
-// const Web3 = require('web3');
-// const web3Instance = new Web3(web3.currentProvider);
-
 function toBytes32(val) {
   return web3.utils.hexToBytes(
     web3.utils.padLeft(web3.utils.toHex(val), 64)

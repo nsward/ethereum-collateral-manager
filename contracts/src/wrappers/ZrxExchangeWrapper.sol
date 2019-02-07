@@ -8,16 +8,19 @@ import "../../lib/AuthTools.sol";
 import "../../lib/ZrxLib.sol";
 import "../interfaces/GemLike.sol";
 import "../interfaces/ZrxExchangeLike.sol";
+import "../interfaces/ProxyLike.sol";
 
 contract ZrxExchangeWrapper is AuthAndOwnable {
 
     address public vault;
     address public zrxProxy;
+    ProxyLike public proxy;
     ZrxExchangeLike public exchange;
     GemLike public zrx;
 
     constructor(
         address _vault,
+        address _proxy,
         address _zeroExExchange,
         address _zeroExProxy,
         address _zrx
@@ -25,6 +28,7 @@ contract ZrxExchangeWrapper is AuthAndOwnable {
         public 
     {
         vault = _vault;
+        proxy = ProxyLike(_proxy);
         zrxProxy = _zeroExProxy;
         exchange = ZrxExchangeLike(_zeroExExchange);
         zrx = GemLike(_zrx);
@@ -40,15 +44,12 @@ contract ZrxExchangeWrapper is AuthAndOwnable {
         address tradeOrigin,
         address makerGem,
         address takerGem,
-        // uint makerAmt,          // -- might not need this. all we care about at this point is fill amt?
-        // uint takerAmt,          // -- same?
         uint fillAmt,
         bytes memory orderData  // TODO: calldata / external
     )
         public auth returns (uint)
     {
-        // ** make sure we're approving the vault to take everything
-        // Also need to take taker fee from user? --- need to get this from chief
+        // TODO: check that order from bytes matches order parameters?
 
         // prepare order and signature for the exchange
         ZrxLib.Order memory order = parseOrder(orderData, makerGem, takerGem);
@@ -89,7 +90,12 @@ contract ZrxExchangeWrapper is AuthAndOwnable {
 
         if (takerFee == 0) { return; }
 
-        zrx.transferFrom(tradeOrigin, address(this), takerFee);
+        // zrx.transferFrom(tradeOrigin, address(this), takerFee);  // if users are approving this contract
+        require(
+            proxy.deal(address(zrx), tradeOrigin, address(this), takerFee),
+            "ccm-ZrxExchangeWrapper-takeTakerFee-deal-failed"
+        );
+
     }
 
     function parseOrder(bytes memory orderData, address makerGem, address takerGem)

@@ -78,7 +78,7 @@ contract Liquidator is Ownable {
             now >= acct.callEnd             && 
             acct.owedBal < acct.callTab;
 
-        require(!safe || callIgnored, "ccm-liquidator-bite-acct-safe");
+        require(!safe || callIgnored, "ecm-liquidator-bite-acct-safe");
 
         _grab(acctKey, owedGem, acct.heldGem, acct.heldBal, spotPrice, asset.biteFee);
     }
@@ -97,11 +97,11 @@ contract Liquidator is Ownable {
 
         vat.set("account", "heldBal", acctKey, 0);
 
-        require(vault.take(owedGem, msg.sender, biteCost), "ccm-liquidator-grab-transfer1-failed");
+        require(vault.take(owedGem, msg.sender, biteCost), "ecm-liquidator-grab-transfer1-failed");
 
         vat.addTo("account", "owedBal", acctKey, biteCost);
 
-        // require(vault.give(heldGem, msg.sender, heldBal), "ccm-liquidator-grab-transfer2-failed");
+        // require(vault.give(heldGem, msg.sender, heldBal), "ecm-liquidator-grab-transfer2-failed");
         bytes32 claimKey = MathTools.k256(msg.sender, heldGem);
         vat.addTo("claim", claimKey, heldBal);
     }

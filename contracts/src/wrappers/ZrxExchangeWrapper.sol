@@ -93,7 +93,7 @@ contract ZrxExchangeWrapper is AuthAndOwnable {
         // zrx.transferFrom(tradeOrigin, address(this), takerFee);  // if users are approving this contract
         require(
             proxy.deal(address(zrx), tradeOrigin, address(this), takerFee),
-            "ccm-ZrxExchangeWrapper-takeTakerFee-deal-failed"
+            "ecm-ZrxExchangeWrapper-takeTakerFee-deal-failed"
         );
 
     }

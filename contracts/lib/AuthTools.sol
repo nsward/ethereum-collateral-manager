@@ -39,7 +39,7 @@ contract Ownable {
      * @dev Throws if called by any account other than the owner.
      */
     modifier onlyOwner() {
-        require(isOwner(), "ccm-ownable-onlyOwner");
+        require(isOwner(), "ecm-ownable-onlyOwner");
         _;
     }
 
@@ -74,7 +74,7 @@ contract Ownable {
      * @param newOwner The address to transfer ownership to.
      */
     function _transferOwnership(address newOwner) internal {
-        require(newOwner != address(0), "ccm-ownable-invalid-transfer-address");
+        require(newOwner != address(0), "ecm-ownable-invalid-transfer-address");
         emit TransferOwnership(_owner, newOwner);
         _owner = newOwner;
     }
@@ -93,7 +93,7 @@ contract AuthAndOwnable is Ownable {
     );
 
     mapping (address => uint) public auths;
-    modifier auth { require(auths[msg.sender] == 1, "ccm-auth"); _; }
+    modifier auth { require(auths[msg.sender] == 1, "ecm-auth"); _; }
     function addAuth(address guy) public onlyOwner {
         auths[guy] = 1; 
         emit AddAuth(guy, msg.sender);

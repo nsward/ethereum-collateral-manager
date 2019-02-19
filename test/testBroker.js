@@ -116,7 +116,7 @@ contract("Broker", function(accounts) {
     // can't lock funds if gem not approved
     await expectRevert(
       broker.lock(acctKey, heldGem.address, lockAmt, {from:user}), 
-      "ccm-broker-lock-gem-unapproved"
+      "ecm-broker-lock-gem-unapproved"
     );
 
     // approve heldGem asset

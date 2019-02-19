@@ -10,7 +10,7 @@ const { expect } = chai;
 chai.use(bnChai(web3.utils.BN));
 
 
-contract("CCM System deployment", function(accounts) {
+contract("ecm System deployment", function(accounts) {
   
   BigNum.config({ DECIMAL_PLACES: 27, POW_PRECISION: 100})
 

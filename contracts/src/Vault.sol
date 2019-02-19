@@ -27,7 +27,7 @@ contract Vault is AuthAndOwnable {
 
     // Transfer tokens from user to us
     function take(address _gem, address src, uint amt) external auth returns (bool) {
-        require(proxy.deal(_gem, src, address(this), amt), "ccm-vault-take-deal-failed");
+        require(proxy.deal(_gem, src, address(this), amt), "ecm-vault-take-deal-failed");
         chest[_gem] = SafeMath.add(chest[_gem], amt);
         verifyBalance(_gem);
         return true;
@@ -37,7 +37,7 @@ contract Vault is AuthAndOwnable {
     function give(address _gem, address dst, uint amt) external auth returns (bool) {
         chest[_gem] = SafeMath.sub(chest[_gem], amt);
         GemLike gem = GemLike(_gem);
-        require(gem.transfer(dst, amt), "ccm-vault-give-transfer-failed");
+        require(gem.transfer(dst, amt), "ecm-vault-give-transfer-failed");
 
         verifyBalance(_gem);
 
@@ -53,7 +53,7 @@ contract Vault is AuthAndOwnable {
     function giveToWrapper(address _gem, address dst, uint amt) external auth returns (bool) {
         chest[_gem] = SafeMath.sub(chest[_gem], amt);
         GemLike gem = GemLike(_gem);
-        require(gem.transfer(dst, amt), "ccm-vault-giveToWrapper-transfer-failed");
+        require(gem.transfer(dst, amt), "ecm-vault-giveToWrapper-transfer-failed");
         verifyBalance(_gem);
         return true;
     }
@@ -61,7 +61,7 @@ contract Vault is AuthAndOwnable {
     function takeFromWrapper(address _gem, address src, uint amt) external auth returns (bool) {
         chest[_gem] = SafeMath.add(chest[_gem], amt);
         GemLike gem = GemLike(_gem);
-        require(gem.transferFrom(src, address(this), amt), "ccm-vault-takeFromWrapper-transfer-failed");
+        require(gem.transferFrom(src, address(this), amt), "ecm-vault-takeFromWrapper-transfer-failed");
         verifyBalance(_gem);
         return true;
     }

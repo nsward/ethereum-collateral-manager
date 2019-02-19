@@ -174,7 +174,7 @@ contract Vat is AuthAndOwnable {
 
     function safeSetPosition(bytes32 acctKey, address heldGem, uint heldBal) external auth {
         Account storage acct = accounts[acctKey];
-        require(acct.heldBal == 0, "ccm-vat-safeSetPosition-position-exists");
+        require(acct.heldBal == 0, "ecm-vat-safeSetPosition-position-exists");
         acct.heldGem = heldGem;
         acct.heldBal = heldBal;
     }
@@ -220,7 +220,7 @@ contract Vat is AuthAndOwnable {
     }
 
     function safeSetOwedGem(bytes32 paramsKey, address owedToken) external auth {
-        require(owedGems[paramsKey] == address(0), "ccm-vat-safeSetOwedToken-owedToken-exists");
+        require(owedGems[paramsKey] == address(0), "ecm-vat-safeSetOwedToken-owedToken-exists");
         owedGems[paramsKey] = owedToken;
     }
 
@@ -236,12 +236,12 @@ contract Vat is AuthAndOwnable {
     }
 
     function safeSetAsset(bytes32 paramsKey, address gem, AssetClass memory _asset) public auth {         // TODO: calldata?
-        require(assets[paramsKey][gem].biteLimit == 0, "ccm-vat-safeSetAsset-asset-exists");
+        require(assets[paramsKey][gem].biteLimit == 0, "ecm-vat-safeSetAsset-asset-exists");
         assets[paramsKey][gem] = _asset;
     }
 
     function doOpen(bytes32 acctKey, Account memory acct) public auth returns (bool) {   // TODO: calldata?
-        require(accounts[acctKey].lastAccrual == 0, "ccm-vat-doOpen-account-exists");
+        require(accounts[acctKey].lastAccrual == 0, "ecm-vat-doOpen-account-exists");
         address owedGem = owedGems[acct.paramsKey];
         allowances[acctKey][owedGem] = allowances[acctKey][owedGem].sub(acct.owedTab);
         accounts[acctKey] = acct;
@@ -275,8 +275,8 @@ contract Vat is AuthAndOwnable {
     function doCall(bytes32 acctKey, uint callTab) external auth returns (uint) {
         updateTab(acctKey);
         Account storage acct = accounts[acctKey];
-        // require(acct.admin == caller, "ccm-vat-doCall-not-admin");   // checked by acctKey
-        require(callTab <= acct.owedTab, "ccm-vat-doCall-callTab-invalid");
+        // require(acct.admin == caller, "ecm-vat-doCall-not-admin");   // checked by acctKey
+        require(callTab <= acct.owedTab, "ecm-vat-doCall-callTab-invalid");
         acct.callTab = callTab;
         uint callEnd = acct.callTime.add(now);
         acct.callEnd = callEnd;

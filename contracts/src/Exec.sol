@@ -102,7 +102,7 @@ contract Exec is Ownable, ExecEvents {
         private returns (bool) 
     {
         // Account user can't be zero
-        require(user != address(0), "ccm-exec-open-lad-invalid");
+        require(user != address(0), "ecm-exec-open-lad-invalid");
 
         // Get owed gem and check that it's not 0
         address owedGem;
@@ -115,7 +115,7 @@ contract Exec is Ownable, ExecEvents {
             owedGem = owedGemGiven;
             vat.set("owedGem", paramsKey, owedGem);
         }
-        require(owedGem != address(0), "ccm-exec-open-no-owedGem");
+        require(owedGem != address(0), "ecm-exec-open-no-owedGem");
 
         // get account key
         bytes32 acctKey = MathTools.k256(msg.sender, user);
@@ -130,9 +130,9 @@ contract Exec is Ownable, ExecEvents {
         acct.paramsKey = paramsKey;
         acct.lastAccrual = now;
 
-        require(vault.take(owedGem, user, owedTab), "ccm-exec-open-take-failed");
+        require(vault.take(owedGem, user, owedTab), "ecm-exec-open-take-failed");
         
-        require(vat.doOpen(acctKey, acct), "ccm-exec-open-doOpen-failed");
+        require(vat.doOpen(acctKey, acct), "ecm-exec-open-doOpen-failed");
 
         emit Open(msg.sender, user, owedGem, owedTab);
         return true;       
@@ -140,7 +140,7 @@ contract Exec is Ownable, ExecEvents {
 
     function setAdminOwedGem(address owedToken) external returns (bool) {
         // can't be 0
-        require(owedToken != address(0), "ccm-exec-setAdminOwedToken-owedToken-invalid");
+        require(owedToken != address(0), "ecm-exec-setAdminOwedToken-owedToken-invalid");
         bytes32 paramsKey = MathTools.k256(msg.sender);
         // verifies that current owedToken is uninitialized, then sets it
         vat.safeSetOwedGem(paramsKey, owedToken);
@@ -152,17 +152,17 @@ contract Exec is Ownable, ExecEvents {
     }
 
     function addAccountAsset(uint tax, uint biteLimit, uint biteFee, address gem, address user) external returns (bool) {
-        require(user != address(0), "ccm-exec-addAccount-asset-invalid-user");
+        require(user != address(0), "ecm-exec-addAccount-asset-invalid-user");
         return _addAsset(tax, biteLimit, biteFee, gem, user);
     }
 
     function _addAsset(uint tax, uint biteLimit, uint biteFee, address gem, address user) internal returns (bool) {
         // liquidation penalty must be at least 1 (no penalty)
-        require(biteFee >= RAY, "ccm-exec-addAsset-biteFee-invalid");
+        require(biteFee >= RAY, "ecm-exec-addAsset-biteFee-invalid");
         // extra collateral has to be able to at least cover penalty
-        require(biteLimit >= biteFee, "ccm-exec-addAsset-biteLimit-invalid");
+        require(biteLimit >= biteFee, "ecm-exec-addAsset-biteLimit-invalid");
         // RAY is equivalent to no tax
-        require(tax >= RAY, "ccm-exec-addAsset-tax-invalid");
+        require(tax >= RAY, "ecm-exec-addAsset-tax-invalid");
 
         bytes32 paramsKey = user == address(0)  ?
             MathTools.k256(msg.sender)          :
@@ -172,7 +172,7 @@ contract Exec is Ownable, ExecEvents {
         
         // must be approved token pair
         bytes32 pairKey = MathTools.k256(owedGem, gem);
-        require(validTokenPairs[pairKey] == 1, "ccm-exec-addAsset-invalid-token-pair");
+        require(validTokenPairs[pairKey] == 1, "ecm-exec-addAsset-invalid-token-pair");
 
         VatLike.AssetClass memory asset;
         asset.use = 1;

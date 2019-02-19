@@ -97,7 +97,7 @@ contract("Exec", function(accounts) {
     await broker.setAllowance(admin, owedGem.address, owedTab, {from:user});
     await expectRevert(
       exec.open(owedTab, callTime, user, owedGem.address, useAdminParams, {from:admin}),
-      "ccm-vat-doOpen-account-exists"
+      "ecm-vat-doOpen-account-exists"
     );
   });
 
@@ -124,7 +124,7 @@ contract("Exec", function(accounts) {
     // can't open account without admin owed gem set
     await expectRevert(
       exec.open(owedTab, callTime, user, owedGem.address, useAdminParams, {from:admin}),
-      "ccm-exec-open-no-owedGem"
+      "ecm-exec-open-no-owedGem"
     );
 
     // set admin params
@@ -157,7 +157,7 @@ contract("Exec", function(accounts) {
     await broker.setAllowance(admin, owedGem.address, owedTab, {from:user});
     await expectRevert(
       exec.open(owedTab, callTime, user, owedGem.address, useAdminParams, {from:admin}),
-      "ccm-vat-doOpen-account-exists"
+      "ecm-vat-doOpen-account-exists"
     );
   });
 
